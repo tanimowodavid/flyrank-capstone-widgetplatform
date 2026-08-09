@@ -5,5 +5,28 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.14.0",
+    "asyncpg>=0.30.0",
     "fastapi[standard]>=0.141.1",
+    "pydantic-settings>=2.7.0",
+    "sqlalchemy[asyncio]>=2.0.36",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+# "auto" so async tests run rather than being silently skipped.
+asyncio_mode = "auto"
+testpaths = ["app/tests"]
+# app/tests has no __init__.py, so pytest would put app/tests on sys.path
+# instead of the repo root and "import app" would fail. This pins the root.
+pythonpath = ["."]
+# One event loop for the whole session. The module-level engine pools asyncpg
+# connections, and a pooled connection is bound to the loop that opened it;
+# per-test loops would reuse it and raise "attached to a different loop".
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
