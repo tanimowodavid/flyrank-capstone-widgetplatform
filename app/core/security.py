@@ -1,11 +1,16 @@
-"""Password hashing primitives.
+"""Password hashing and access-token primitives.
 
-Bcrypt via passlib. The CryptContext is built once at import: each construction
-re-runs passlib's backend probing, which is wasted work per call.
+Deliberately free of FastAPI imports: this module knows about credentials and
+tokens, not about HTTP. Translating a failure into a 401 is the caller's job.
 """
 
+from datetime import UTC, datetime, timedelta
+
+import jwt
 from passlib.context import CryptContext
 from passlib.exc import UnknownHashError
+
+from app.core.config import settings
 
 # Bcrypt hashes only the first 72 bytes of a secret. passlib's default is to
 # truncate silently, which would make two different long passwords interchangeable
@@ -34,3 +39,56 @@ def verify_password(plain: str, hashed: str) -> bool:
         return pwd_context.verify(plain, hashed)
     except (UnknownHashError, ValueError):
         return False
+
+
+class TokenError(Exception):
+    """A token was missing, malformed, expired, or signed with another key.
+
+    One exception for every failure mode on purpose: callers should not be able
+    to branch on the reason, and clients should not learn it.
+    """
+
+
+def create_access_token(
+    subject: str,
+    expires_delta: timedelta | None = None,
+) -> str:
+    """Sign an access token for `subject` (the customer's id).
+
+    `expires_delta` overrides the configured lifetime; tests use it to mint an
+    already-expired token without waiting.
+    """
+    now = datetime.now(UTC)
+    expire = now + (
+        expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    payload = {
+        "sub": subject,
+        "iat": now,
+        "exp": expire,
+        "type": "access",
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> dict:
+    """Verify signature and expiry, returning the claims.
+
+    Raises TokenError on any problem. `algorithms` is pinned to the configured
+    algorithm so a token cannot dictate how it is verified.
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ["exp", "sub"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise TokenError("Could not validate credentials") from exc
+
+    # A refresh token must not be accepted where an access token is required.
+    if payload.get("type") != "access":
+        raise TokenError("Could not validate credentials")
+
+    return payload
