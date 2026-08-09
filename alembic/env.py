@@ -24,11 +24,15 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Inject the DSN from environment settings. ConfigParser treats "%" as
-# interpolation, so any percent-encoded character in the URL (e.g. a password
-# containing "@" -> "%40") must be escaped or Alembic aborts with an
-# interpolation error.
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
+# Inject the DSN from environment settings, unless a programmatic caller already
+# supplied one — the test harness passes the throwaway test database this way, so
+# `pytest` migrates that instead of the development database.
+#
+# ConfigParser treats "%" as interpolation, so any percent-encoded character in
+# the URL (e.g. a password containing "@" -> "%40") must be escaped or Alembic
+# aborts with an interpolation error.
+db_url = config.attributes.get("sqlalchemy_url") or settings.DATABASE_URL
+config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
 # Metadata for 'autogenerate' support.
 target_metadata = Base.metadata

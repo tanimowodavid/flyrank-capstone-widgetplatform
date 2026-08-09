@@ -1,0 +1,255 @@
+"""Tests for signup, login, and the get_current_customer dependency."""
+
+import uuid
+from datetime import timedelta
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import create_access_token, verify_password
+from app.models.customer import Customer
+
+# No asyncio marker: pyproject sets asyncio_mode = "auto".
+
+SIGNUP_URL = "/api/v1/auth/signup"
+LOGIN_URL = "/api/v1/auth/login"
+ME_URL = "/api/v1/auth/me"
+
+PASSWORD = "correct-horse-battery"
+
+
+def signup_payload(**overrides) -> dict:
+    payload = {
+        "organization_name": "Acme Widgets",
+        "email": "owner@acme.example",
+        "password": PASSWORD,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def auth_header(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+class TestSignup:
+    async def test_signup_succeeds_and_returns_token(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        response = await client.post(SIGNUP_URL, json=signup_payload())
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["token_type"] == "bearer"
+        assert body["access_token"]
+
+        customer = (
+            await db_session.execute(
+                select(Customer).where(Customer.email == "owner@acme.example")
+            )
+        ).scalar_one()
+        assert customer.organization_name == "Acme Widgets"
+        assert customer.created_at is not None
+
+    async def test_signup_stores_a_hash_not_the_password(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await client.post(SIGNUP_URL, json=signup_payload())
+
+        customer = (await db_session.execute(select(Customer))).scalar_one()
+        assert customer.password_hash != PASSWORD
+        assert verify_password(PASSWORD, customer.password_hash)
+
+    async def test_duplicate_email_is_rejected(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        first = await client.post(SIGNUP_URL, json=signup_payload())
+        assert first.status_code == 201
+
+        second = await client.post(
+            SIGNUP_URL, json=signup_payload(organization_name="Impostor")
+        )
+
+        assert second.status_code == 409
+        assert second.json()["detail"] == "Email already registered"
+
+        # The conflict must not have created a second row or altered the first.
+        customers = (await db_session.execute(select(Customer))).scalars().all()
+        assert len(customers) == 1
+        assert customers[0].organization_name == "Acme Widgets"
+
+    async def test_duplicate_email_is_rejected_regardless_of_case(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post(SIGNUP_URL, json=signup_payload())
+
+        response = await client.post(
+            SIGNUP_URL, json=signup_payload(email="OWNER@ACME.EXAMPLE")
+        )
+
+        assert response.status_code == 409
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"email": "not-an-email"},
+            {"password": "short"},
+            {"password": "x" * 73},  # over bcrypt's 72-byte limit
+            {"organization_name": ""},
+        ],
+    )
+    async def test_invalid_signup_is_rejected(
+        self, client: AsyncClient, overrides: dict
+    ) -> None:
+        response = await client.post(SIGNUP_URL, json=signup_payload(**overrides))
+
+        assert response.status_code == 422
+
+
+class TestLogin:
+    async def test_login_succeeds_with_correct_credentials(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post(SIGNUP_URL, json=signup_payload())
+
+        response = await client.post(
+            LOGIN_URL, json={"email": "owner@acme.example", "password": PASSWORD}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["access_token"]
+        assert response.json()["token_type"] == "bearer"
+
+    async def test_login_accepts_a_differently_cased_email(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post(SIGNUP_URL, json=signup_payload())
+
+        response = await client.post(
+            LOGIN_URL, json={"email": "Owner@Acme.EXAMPLE", "password": PASSWORD}
+        )
+
+        assert response.status_code == 200
+
+    async def test_wrong_password_is_rejected(self, client: AsyncClient) -> None:
+        await client.post(SIGNUP_URL, json=signup_payload())
+
+        response = await client.post(
+            LOGIN_URL, json={"email": "owner@acme.example", "password": "not-my-password"}
+        )
+
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Invalid credentials"
+        assert "access_token" not in response.json()
+
+    async def test_failure_does_not_reveal_whether_the_email_exists(
+        self, client: AsyncClient
+    ) -> None:
+        """Wrong password and unknown email must be indistinguishable."""
+        await client.post(SIGNUP_URL, json=signup_payload())
+
+        wrong_password = await client.post(
+            LOGIN_URL, json={"email": "owner@acme.example", "password": "not-my-password"}
+        )
+        unknown_email = await client.post(
+            LOGIN_URL, json={"email": "nobody@acme.example", "password": PASSWORD}
+        )
+
+        assert wrong_password.status_code == unknown_email.status_code == 401
+        assert wrong_password.json() == unknown_email.json()
+
+
+class TestGetCurrentCustomer:
+    async def test_valid_token_is_accepted(self, client: AsyncClient) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.get(ME_URL, headers=auth_header(token))
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["email"] == "owner@acme.example"
+        assert body["organization_name"] == "Acme Widgets"
+        assert "password_hash" not in body
+        assert "password" not in body
+
+    async def test_token_from_login_is_accepted(self, client: AsyncClient) -> None:
+        await client.post(SIGNUP_URL, json=signup_payload())
+        token = (
+            await client.post(
+                LOGIN_URL, json={"email": "owner@acme.example", "password": PASSWORD}
+            )
+        ).json()["access_token"]
+
+        response = await client.get(ME_URL, headers=auth_header(token))
+
+        assert response.status_code == 200
+
+    async def test_expired_token_is_rejected(self, client: AsyncClient) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        me = await client.get(ME_URL, headers=auth_header(token))
+        assert me.status_code == 200, "token must work before it expires"
+
+        customer_id = me.json()["id"]
+        expired = create_access_token(
+            subject=customer_id, expires_delta=timedelta(minutes=-1)
+        )
+
+        response = await client.get(ME_URL, headers=auth_header(expired))
+
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Could not validate credentials"
+
+    @pytest.mark.parametrize(
+        ("label", "headers"),
+        [
+            ("no header", {}),
+            ("empty bearer", {"Authorization": "Bearer "}),
+            ("malformed token", {"Authorization": "Bearer garbage.token.here"}),
+            ("not a jwt", {"Authorization": "Bearer abc123"}),
+            ("wrong scheme", {"Authorization": f"Basic {create_access_token('x')}"}),
+        ],
+    )
+    async def test_invalid_credentials_are_rejected(
+        self, client: AsyncClient, label: str, headers: dict
+    ) -> None:
+        response = await client.get(ME_URL, headers=headers)
+
+        assert response.status_code == 401, label
+
+    async def test_token_signed_with_another_key_is_rejected(
+        self, client: AsyncClient
+    ) -> None:
+        """Guards against accepting a token the server did not sign."""
+        import jwt
+
+        from app.core.config import settings
+
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        claims = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+        )
+        # 32+ bytes only to avoid PyJWT's short-key warning; the point is that
+        # this key is not the server's.
+        forged = jwt.encode(claims, "an-attacker-secret-long-enough-to-sign", algorithm="HS256")
+
+        response = await client.get(ME_URL, headers=auth_header(forged))
+
+        assert response.status_code == 401
+
+    async def test_token_for_a_deleted_customer_is_rejected(
+        self, client: AsyncClient
+    ) -> None:
+        """A well-formed token whose subject no longer exists must not authenticate."""
+        token = create_access_token(subject=str(uuid.uuid4()))
+
+        response = await client.get(ME_URL, headers=auth_header(token))
+
+        assert response.status_code == 401

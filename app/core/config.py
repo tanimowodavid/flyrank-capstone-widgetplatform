@@ -45,10 +45,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
-    @computed_field
-    @property
-    def DATABASE_URL(self) -> str:
-        """Async SQLAlchemy DSN.
+    # Test database, created and dropped by the pytest session. Defaults to
+    # "<POSTGRES_DB>_test" so it can never be the development database.
+    POSTGRES_TEST_DB: str | None = None
+
+    def build_dsn(self, database: str) -> str:
+        """Async SQLAlchemy DSN for `database` on the configured server.
 
         User and password are percent-encoded so credentials containing "@", ":"
         or "/" cannot break the URL into the wrong parts.
@@ -57,8 +59,32 @@ class Settings(BaseSettings):
         password = quote_plus(self.POSTGRES_PASSWORD)
         return (
             f"postgresql+asyncpg://{user}:{password}"
-            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{database}"
         )
+
+    @computed_field
+    @property
+    def DATABASE_URL(self) -> str:
+        return self.build_dsn(self.POSTGRES_DB)
+
+    # Plain properties, not computed_field: these are test-harness plumbing and
+    # do not belong in a serialised settings dump.
+    @property
+    def TEST_DATABASE_NAME(self) -> str:
+        return self.POSTGRES_TEST_DB or f"{self.POSTGRES_DB}_test"
+
+    @property
+    def TEST_DATABASE_URL(self) -> str:
+        return self.build_dsn(self.TEST_DATABASE_NAME)
+
+    @property
+    def MAINTENANCE_DATABASE_URL(self) -> str:
+        """DSN for the always-present "postgres" database.
+
+        CREATE/DROP DATABASE cannot run while connected to the target, so the
+        harness issues them from here.
+        """
+        return self.build_dsn("postgres")
 
 
 @lru_cache
