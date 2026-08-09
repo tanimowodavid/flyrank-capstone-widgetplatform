@@ -1,0 +1,49 @@
+erDiagram
+    CUSTOMERS ||--o{ WIDGETS : owns
+    WIDGETS ||--o{ FORM_FIELDS : contains
+    WIDGETS ||--o{ SUBMISSIONS : receives
+    CUSTOMERS ||--o{ SUBMISSIONS : owns
+
+    CUSTOMERS {
+        uuid id PK
+        string organization_name
+        string email UK
+        string password_hash
+        timestamp created_at
+        timestamp updated_at
+    }
+    WIDGETS {
+        uuid id PK
+        uuid customer_id FK
+        string widget_type
+        string title
+        text description
+        string button_text
+        string theme_color
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+    }
+    FORM_FIELDS {
+        uuid id PK
+        uuid widget_id FK
+        string field_name
+        string label
+        string field_type
+        string placeholder
+        boolean is_required
+        int display_order
+    }
+    SUBMISSIONS {
+        uuid id PK
+        uuid widget_id FK
+        uuid customer_id FK
+        json payload
+        string submitter_ip
+        string user_agent
+        string geo_country
+        string geo_city
+        string geo_provider
+        boolean is_spam
+        timestamp created_at
+    }
