@@ -5,3 +5,4 @@ Let a customer define a widget, hand them one line of &lt;script>, and safely ca
 ## Documentation
 
 - [Product Requirements Document (PRD)](docs/PRD.md)
+- [Entity Relationship Diagram (ERD)](docs/ERD.md)
