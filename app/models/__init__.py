@@ -9,5 +9,6 @@ also build the engine.
 """
 
 from app.db.base import Base
+from app.models.customer import Customer
 
-__all__ = ["Base"]
+__all__ = ["Base", "Customer"]
