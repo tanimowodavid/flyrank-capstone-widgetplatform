@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.customer import Customer
 from app.repositories.customer import CustomerRepository
-from app.schemas.customer import CustomerLogin, CustomerSignup
+from app.schemas.customer import (
+    CustomerLogin,
+    CustomerPasswordChange,
+    CustomerSignup,
+)
 
 # Verified against when no customer matches, so a missing email costs the same
 # bcrypt work as a wrong password. Without this, response time alone tells an
@@ -24,6 +28,14 @@ class EmailAlreadyRegisteredError(Exception):
 
 class InvalidCredentialsError(Exception):
     """Email is unknown or the password is wrong — caller must not learn which."""
+
+
+class IncorrectPasswordError(Exception):
+    """The supplied current password did not match the stored hash.
+
+    Distinct from InvalidCredentialsError: the caller is already authenticated,
+    so naming the failing field is not an enumeration risk here.
+    """
 
 
 class AuthService:
@@ -68,6 +80,25 @@ class AuthService:
 
     def issue_access_token(self, customer: Customer) -> str:
         return create_access_token(subject=str(customer.id))
+
+    async def change_password(
+        self,
+        customer: Customer,
+        payload: CustomerPasswordChange,
+    ) -> Customer:
+        """Re-verify the current password, then replace the stored hash.
+
+        Holding a valid token is not sufficient: a borrowed or stolen token must
+        not be enough to lock the real owner out of their account, so the current
+        password is proved again here regardless of authentication state.
+        """
+        if not verify_password(payload.current_password, customer.password_hash):
+            raise IncorrectPasswordError
+
+        customer.password_hash = hash_password(payload.new_password)
+        await self.session.commit()
+        await self.session.refresh(customer)
+        return customer
 
     @staticmethod
     def _normalize_email(email: str) -> str:

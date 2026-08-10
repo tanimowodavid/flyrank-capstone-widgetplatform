@@ -24,6 +24,13 @@ class CustomerLogin(BaseModel):
     password: str
 
 
+class CustomerPasswordChange(BaseModel):
+    # current_password is unconstrained for the same reason as CustomerLogin's:
+    # it is checked against the stored hash, not against today's policy.
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=BCRYPT_MAX_BYTES)
+
+
 class CustomerRead(BaseModel):
     """Customer as returned to clients. password_hash is deliberately absent."""
 

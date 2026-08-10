@@ -16,6 +16,7 @@ from app.models.customer import Customer
 SIGNUP_URL = "/api/v1/auth/signup"
 LOGIN_URL = "/api/v1/auth/login"
 ME_URL = "/api/v1/auth/me"
+CHANGE_PASSWORD_URL = "/api/v1/auth/change-password"
 
 PASSWORD = "correct-horse-battery"
 
@@ -253,3 +254,104 @@ class TestGetCurrentCustomer:
         response = await client.get(ME_URL, headers=auth_header(token))
 
         assert response.status_code == 401
+
+
+NEW_PASSWORD = "a-brand-new-passphrase"
+
+
+class TestChangePassword:
+    async def test_password_change_succeeds(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.post(
+            CHANGE_PASSWORD_URL,
+            headers=auth_header(token),
+            json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
+        )
+
+        assert response.status_code == 200
+        assert "password_hash" not in response.json()
+
+        customer = (await db_session.execute(select(Customer))).scalar_one()
+        assert verify_password(NEW_PASSWORD, customer.password_hash)
+        assert not verify_password(PASSWORD, customer.password_hash)
+
+    async def test_new_password_works_at_login_and_old_one_does_not(
+        self, client: AsyncClient
+    ) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        await client.post(
+            CHANGE_PASSWORD_URL,
+            headers=auth_header(token),
+            json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
+        )
+
+        with_new = await client.post(
+            LOGIN_URL, json={"email": "owner@acme.example", "password": NEW_PASSWORD}
+        )
+        with_old = await client.post(
+            LOGIN_URL, json={"email": "owner@acme.example", "password": PASSWORD}
+        )
+
+        assert with_new.status_code == 200
+        assert with_new.json()["access_token"]
+        assert with_old.status_code == 401
+
+    async def test_wrong_current_password_is_rejected(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Being authenticated is not enough — the old password must still be proved."""
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.post(
+            CHANGE_PASSWORD_URL,
+            headers=auth_header(token),
+            json={"current_password": "not-my-password", "new_password": NEW_PASSWORD},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Current password is incorrect"
+
+        # The stored hash must be untouched by the rejected attempt.
+        customer = (await db_session.execute(select(Customer))).scalar_one()
+        assert verify_password(PASSWORD, customer.password_hash)
+        assert not verify_password(NEW_PASSWORD, customer.password_hash)
+
+    async def test_unauthenticated_request_is_rejected(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post(SIGNUP_URL, json=signup_payload())
+
+        response = await client.post(
+            CHANGE_PASSWORD_URL,
+            json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
+        )
+
+        assert response.status_code == 401
+
+    @pytest.mark.parametrize(
+        "new_password",
+        ["short", "x" * 73],  # under the minimum, then over bcrypt's 72-byte limit
+    )
+    async def test_invalid_new_password_is_rejected(
+        self, client: AsyncClient, new_password: str
+    ) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.post(
+            CHANGE_PASSWORD_URL,
+            headers=auth_header(token),
+            json={"current_password": PASSWORD, "new_password": new_password},
+        )
+
+        assert response.status_code == 422

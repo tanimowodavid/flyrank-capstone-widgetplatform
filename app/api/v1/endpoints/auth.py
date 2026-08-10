@@ -1,12 +1,19 @@
-"""Signup, login, and the current-customer probe."""
+"""Signup, login, and authenticated account management."""
 
 from fastapi import APIRouter, HTTPException, status
 
 from app.core.deps import CurrentCustomer, DbSession
-from app.schemas.customer import CustomerLogin, CustomerRead, CustomerSignup, Token
+from app.schemas.customer import (
+    CustomerLogin,
+    CustomerPasswordChange,
+    CustomerRead,
+    CustomerSignup,
+    Token,
+)
 from app.services.auth import (
     AuthService,
     EmailAlreadyRegisteredError,
+    IncorrectPasswordError,
     InvalidCredentialsError,
 )
 
@@ -60,3 +67,25 @@ async def login(payload: CustomerLogin, db: DbSession) -> Token:
 )
 async def read_current_customer(customer: CurrentCustomer) -> CustomerRead:
     return CustomerRead.model_validate(customer)
+
+
+@router.post(
+    "/change-password",
+    response_model=CustomerRead,
+    summary="Change the authenticated customer's password",
+)
+async def change_password(
+    payload: CustomerPasswordChange,
+    customer: CurrentCustomer,
+    db: DbSession,
+) -> CustomerRead:
+    service = AuthService(db)
+    try:
+        updated = await service.change_password(customer, payload)
+    except IncorrectPasswordError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        ) from exc
+
+    return CustomerRead.model_validate(updated)
