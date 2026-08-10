@@ -17,6 +17,8 @@ The engineering goal is resilience: a submission is never lost because a third-p
 | Database      | PostgreSQL 16                         |
 | ORM           | SQLAlchemy 2.0 (async) with `asyncpg` |
 | Migrations    | Alembic (async template)              |
+| Cache / limits| Redis 7 (`slowapi` + `limits`)        |
+| Auth          | JWT (`PyJWT`) + bcrypt via `passlib`  |
 | Config        | Pydantic `BaseSettings`               |
 | Packaging     | uv                                    |
 | Runtime       | Docker Compose                        |
@@ -87,8 +89,44 @@ Source is bind-mounted into the container and uvicorn runs with `--reload`, so e
 | `DB_POOL_TIMEOUT`   | `30`                      | Seconds to wait for a free connection                                                  |
 | `DB_POOL_RECYCLE`   | `1800`                    | Recycle connections older than this, in seconds                                        |
 | `DB_ECHO`           | `false`                   | Log every SQL statement                                                                |
+| `SECRET_KEY`        | —                         | **Required** — signs JWTs. Rotating it invalidates every issued token                  |
+| `JWT_ALGORITHM`     | `HS256`                   |                                                                                        |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `60`            |                                                                                        |
+| `REDIS_HOST`        | `redis`                   | `localhost` in `.env` for host-side runs; Compose overrides to `redis`                 |
+| `REDIS_PORT`        | `6379`                    | `6380` on the host to avoid clashing with a local Redis                                |
+| `REDIS_PASSWORD`    | —                         | Optional; unset for local Docker                                                       |
+| `REDIS_DB`          | `0`                       | Database used for rate limit counters                                                  |
+| `REDIS_TEST_DB`     | `15`                      | Flushed by the test suite — must differ from `REDIS_DB`                                |
+| `RATE_LIMIT_LOGIN`  | `5/minute`                | Any `limits` format, e.g. `100/hour`                                                   |
+| `RATE_LIMIT_ENABLED`| `true`                    | Set `false` to disable limiting globally                                               |
 
 Postgres is published on host port **5433**, not 5432. Connect with `psql -h localhost -p 5433 -U <user> -d <db>`.
+
+Redis is published on host port **6380**, not 6379. Connect with `redis-cli -p 6380`.
+
+## Rate limiting
+
+Rate limits are enforced by [slowapi](https://github.com/laurentS/slowapi) with **Redis-backed** storage, configured in [app/core/rate_limit.py](app/core/rate_limit.py).
+
+Redis rather than in-memory storage is a correctness requirement, not an optimisation: counters must be shared across worker processes. In-memory storage would give each uvicorn worker its own counter, silently turning `5/minute` into `5/minute per worker`.
+
+| Endpoint           | Limit                     | Key       |
+| ------------------ | ------------------------- | --------- |
+| `POST /auth/login` | `RATE_LIMIT_LOGIN` (5/min) | Client IP |
+
+Exceeding a limit returns `429` with a `Retry-After` header (seconds until the window resets) and a `{"detail": ...}` body matching every other API error. Successful responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` so a client can back off before being rejected.
+
+Login counts **every** attempt, successful or not. Counting only failures would let an attacker reset their own budget with one valid login.
+
+To limit a new endpoint, decorate it and give it a `Request` and `Response` parameter — slowapi reads the caller's IP from the former and writes headers onto the latter:
+
+```python
+@router.post("/submissions")
+@limiter.limit(settings.RATE_LIMIT_SUBMISSION)
+async def create_submission(request: Request, response: Response, ...): ...
+```
+
+Behind a proxy or load balancer, `get_remote_address` returns the proxy's IP, which collapses every visitor into one bucket. Before deploying, run uvicorn with `--proxy-headers` and key off the forwarded client address.
 
 ## Running tests
 
@@ -105,7 +143,15 @@ uv sync
 uv run pytest -v
 ```
 
-Host runs read `POSTGRES_HOST`/`POSTGRES_PORT` from `.env`, which point at `localhost:5433`. Tests that touch the database need `docker compose up -d db` first.
+Host runs read `POSTGRES_HOST`/`POSTGRES_PORT` and `REDIS_HOST`/`REDIS_PORT` from `.env`, which point at `localhost:5433` and `localhost:6380`. Start both dependencies first:
+
+```bash
+docker compose up -d db redis
+```
+
+Tests run against a throwaway `<POSTGRES_DB>_test` database and Redis DB `REDIS_TEST_DB` (15), so a run never touches development data. Rate limit tests skip with a clear reason if Redis is unreachable rather than failing the suite.
+
+Rate limiting is **disabled by default in tests** by an autouse fixture and enabled only inside the rate limit tests themselves. Without that, the shared per-IP counter would leak across tests — every test client shares one address, so the 40-plus login calls elsewhere in the suite would trip the limit and fail unrelated assertions.
 
 ## Database migrations
 
@@ -136,9 +182,11 @@ docker compose down -v         # stop and DELETE all database data
 
 ## Project status
 
-Implemented: configuration, async database layer, session dependency injection, containerisation, Alembic setup, and health/readiness endpoints.
+Implemented: configuration, async database layer, session dependency injection, containerisation, Alembic setup, health/readiness endpoints, the full [ERD](docs/ERD.mmd) schema (`Customer`, `Widget`, `FormField`, `Submission`) with `ON DELETE CASCADE`, JWT authentication (signup, login, `GET /me`, change password, `PATCH /me`, `DELETE /me` with cascade delete), and Redis-backed rate limiting on login.
 
-Not yet built: ORM models for the [ERD](docs/ERD.mmd) entities, authentication, widget CRUD, the embed snippet, public submission handling, rate limiting, spam filtering, and geo enrichment.
+Not yet built: widget CRUD, the embed snippet, public submission handling, spam filtering, and geo enrichment. The `Widget`, `FormField`, and `Submission` tables exist as data models only — no endpoints or services target them yet.
+
+Known gap: JWTs are stateless with no revocation list, so a token issued before a password change stays valid until it expires (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 60). Closing it needs a token version column or a revocation store.
 
 ## Documentation
 

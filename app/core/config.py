@@ -49,6 +49,40 @@ class Settings(BaseSettings):
     # "<POSTGRES_DB>_test" so it can never be the development database.
     POSTGRES_TEST_DB: str | None = None
 
+    # Redis — backs rate limiting. Shared across processes, so a limit holds for
+    # the whole deployment rather than per-worker as in-memory storage would.
+    REDIS_HOST: str = "redis"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str | None = None
+    # Database 0 is the app's; the test suite uses a different index so a test
+    # run can flush its counters without touching development state.
+    REDIS_DB: int = 0
+    REDIS_TEST_DB: int = 15
+
+    # Login rate limit, as a limits-library string ("5/minute", "100/hour").
+    # Configurable so it can be tightened in production without a code change.
+    RATE_LIMIT_LOGIN: str = "5/minute"
+    # Turn limiting off wholesale. Most tests need it off; the ones that prove it
+    # works turn it back on explicitly.
+    RATE_LIMIT_ENABLED: bool = True
+
+    def build_redis_url(self, db: int) -> str:
+        """Redis DSN for `db` on the configured server.
+
+        Password is percent-encoded for the same reason as the Postgres DSN: a
+        credential containing "@" or "/" would otherwise split the URL wrongly.
+        """
+        auth = f":{quote_plus(self.REDIS_PASSWORD)}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{db}"
+
+    @property
+    def REDIS_URL(self) -> str:
+        return self.build_redis_url(self.REDIS_DB)
+
+    @property
+    def REDIS_TEST_URL(self) -> str:
+        return self.build_redis_url(self.REDIS_TEST_DB)
+
     def build_dsn(self, database: str) -> str:
         """Async SQLAlchemy DSN for `database` on the configured server.
 

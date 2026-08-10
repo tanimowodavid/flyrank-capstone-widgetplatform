@@ -1,8 +1,10 @@
 """Signup, login, and authenticated account management."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 
+from app.core.config import settings
 from app.core.deps import CurrentCustomer, DbSession
+from app.core.rate_limit import limiter
 from app.schemas.customer import (
     CustomerLogin,
     CustomerPasswordChange,
@@ -45,7 +47,19 @@ async def signup(payload: CustomerSignup, db: DbSession) -> Token:
     response_model=Token,
     summary="Exchange credentials for an access token",
 )
-async def login(payload: CustomerLogin, db: DbSession) -> Token:
+@limiter.limit(settings.RATE_LIMIT_LOGIN)
+async def login(
+    request: Request, response: Response, payload: CustomerLogin, db: DbSession
+) -> Token:
+    """Rate limited per IP: this is the endpoint an attacker brute-forces.
+
+    The limit counts every attempt, successful or not — counting only failures
+    would let a caller reset their own budget with one valid login.
+
+    `request` and `response` are required by the limiter, not by this handler:
+    slowapi reads the caller's IP off the request and writes the X-RateLimit-*
+    headers onto the response.
+    """
     service = AuthService(db)
     try:
         customer = await service.authenticate(payload)

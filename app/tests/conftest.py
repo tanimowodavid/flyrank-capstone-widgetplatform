@@ -10,9 +10,12 @@ import asyncio
 from collections.abc import AsyncGenerator, Generator
 
 import pytest
+import redis
 from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from limits.storage import storage_from_string
+from limits.strategies import STRATEGIES
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -23,6 +26,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.db import get_db
 from app.db.base import Base
 from app.main import app
@@ -133,6 +137,56 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture(autouse=True)
+def disable_rate_limiting() -> Generator[None, None, None]:
+    """Keep the limiter off for the suite at large.
+
+    Rate limits are shared state keyed by client IP, and every test here logs in
+    from the same address. Left on, one test's attempts would exhaust another
+    test's budget and the failure would depend on execution order. The tests that
+    prove limiting works re-enable it explicitly via the rate_limited fixture.
+    """
+    limiter.enabled = False
+    yield
+    limiter.enabled = False
+
+
+@pytest.fixture
+def rate_limited() -> Generator[None, None, None]:
+    """Enable rate limiting for one test, against an isolated Redis database.
+
+    Counters are flushed on both sides of the test: leftovers from a previous
+    run would otherwise make the first request of this one arrive mid-window.
+    """
+    redis_client = redis.Redis.from_url(settings.REDIS_TEST_URL)
+    try:
+        redis_client.ping()
+    except redis.RedisError:
+        pytest.skip("Redis is not reachable — start it with `docker compose up -d redis`")
+
+    original_storage_uri = limiter._storage_uri
+    redis_client.flushdb()
+
+    # Point the limiter at the test database and rebuild its storage, so counters
+    # never land in the database the running app uses.
+    limiter._storage_uri = settings.REDIS_TEST_URL
+    limiter._storage = storage_from_string(settings.REDIS_TEST_URL)
+    limiter._limiter = STRATEGIES[limiter._strategy or "fixed-window"](limiter._storage)
+    limiter.enabled = True
+
+    try:
+        yield
+    finally:
+        limiter.enabled = False
+        limiter._storage_uri = original_storage_uri
+        limiter._storage = storage_from_string(original_storage_uri)
+        limiter._limiter = STRATEGIES[limiter._strategy or "fixed-window"](
+            limiter._storage
+        )
+        redis_client.flushdb()
+        redis_client.close()
 
 
 @pytest.fixture

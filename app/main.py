@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.rate_limit import init_rate_limiting
 from app.db import engine
 
 
@@ -20,6 +21,10 @@ app = FastAPI(
     debug=settings.DEBUG,
     lifespan=lifespan,
 )
+
+# Before include_router: the exception handler must be registered on the app
+# that ends up serving the limited routes.
+init_rate_limiting(app)
 
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 

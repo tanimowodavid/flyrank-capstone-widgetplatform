@@ -21,6 +21,26 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: flyrank_redis
+    # appendonly so rate-limit counters survive a container restart. Losing them
+    # would hand an attacker a clean slate every time Redis bounces.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      # 6380 on the host to avoid clashing with a locally installed Redis, and
+      # with any other project's container already holding 6379.
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   app:
     build:
       # Root context: pyproject.toml and uv.lock live above app/.
@@ -33,8 +53,12 @@ services:
       # alembic/pytest runs, where the database is on localhost:5433.
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "8000:8000"
@@ -44,3 +68,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
