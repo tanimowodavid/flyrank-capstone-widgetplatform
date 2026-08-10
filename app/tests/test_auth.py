@@ -585,7 +585,12 @@ class TestDeleteAccount:
     async def test_delete_cascades_to_widgets_and_submissions(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """The database's ON DELETE CASCADE must clear the whole owned tree."""
+        """The database's ON DELETE CASCADE must clear the whole owned tree.
+
+        Submissions now reach this outcome only via submissions.customer_id, since
+        submissions.widget_id is ON DELETE SET NULL: deleting the widget alone
+        preserves the submission. Deleting the owning customer still removes it.
+        """
         token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
             "access_token"
         ]

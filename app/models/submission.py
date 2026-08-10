@@ -23,10 +23,13 @@ class Submission(Base):
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
-    widget_id: Mapped[uuid.UUID] = mapped_column(
+    widget_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("widgets.id", ondelete="CASCADE"),
-        nullable=False,
+        # SET NULL rather than CASCADE: a submission must outlive the widget it
+        # was created against. The stored payload and its snapshot keep the
+        # historical record meaningful even after the widget is deleted.
+        ForeignKey("widgets.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     customer_id: Mapped[uuid.UUID] = mapped_column(

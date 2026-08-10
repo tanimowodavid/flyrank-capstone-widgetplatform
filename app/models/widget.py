@@ -64,9 +64,12 @@ class Widget(Base):
         cascade="all, delete",
         passive_deletes=True,
     )
+    # No delete cascade, unlike form_fields: the FK is ON DELETE SET NULL, so
+    # deleting a widget orphans its submissions rather than destroying them — a
+    # captured lead outlives the form it arrived through. passive_deletes leaves
+    # the nulling to Postgres instead of having the ORM rewrite each row.
     submissions: Mapped[list["Submission"]] = relationship(  # noqa: F821
         back_populates="widget",
-        cascade="all, delete",
         passive_deletes=True,
     )
 
