@@ -63,6 +63,10 @@ class Widget(Base):
         back_populates="widget",
         cascade="all, delete",
         passive_deletes=True,
+        # Postgres returns rows in no guaranteed order, so without this the form
+        # would render its inputs arbitrarily despite display_order being stored
+        # correctly. Ordering here covers every load path, not just one query.
+        order_by="FormField.display_order",
     )
     # No delete cascade, unlike form_fields: the FK is ON DELETE SET NULL, so
     # deleting a widget orphans its submissions rather than destroying them — a

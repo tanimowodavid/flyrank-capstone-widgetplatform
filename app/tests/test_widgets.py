@@ -1,7 +1,8 @@
-"""Tests for widget creation (POST /widgets).
+"""Tests for widget creation, listing and retrieval.
 
 Ownership is the property under test throughout: a widget belongs to the caller
-identified by the access token, and nothing in the request body can change that.
+identified by the access token, nothing in the request body can change that, and
+another tenant's widget is indistinguishable from one that does not exist.
 """
 
 import uuid
@@ -68,6 +69,22 @@ async def register(client: AsyncClient, **overrides) -> str:
     response = await client.post(SIGNUP_URL, json=signup_payload(**overrides))
     assert response.status_code == 201
     return response.json()["access_token"]
+
+
+async def register_other(client: AsyncClient) -> str:
+    """Sign up a second, unrelated customer — the cross-tenant counterparty."""
+    return await register(
+        client, email="rival@other.example", organization_name="Other Co"
+    )
+
+
+async def create_widget(client: AsyncClient, token: str, **overrides) -> dict:
+    """Create a widget as `token`'s owner and return the response body."""
+    response = await client.post(
+        WIDGETS_URL, headers=auth_header(token), json=widget_payload(**overrides)
+    )
+    assert response.status_code == 201
+    return response.json()
 
 
 class TestCreateWidget:
@@ -434,3 +451,174 @@ class TestCreateWidgetValidation:
         )
 
         assert response.status_code == 422
+
+
+class TestListWidgets:
+    async def test_listing_returns_only_the_callers_widgets(
+        self, client: AsyncClient
+    ) -> None:
+        """The scope is the token, not a query parameter the caller could drop."""
+        token = await register(client)
+        mine = [
+            await create_widget(client, token, title="Mine A"),
+            await create_widget(client, token, title="Mine B"),
+        ]
+
+        other_token = await register_other(client)
+        theirs = await create_widget(client, other_token, title="Theirs")
+
+        response = await client.get(WIDGETS_URL, headers=auth_header(token))
+
+        assert response.status_code == 200
+        body = response.json()
+        assert {widget["id"] for widget in body} == {widget["id"] for widget in mine}
+        assert theirs["id"] not in {widget["id"] for widget in body}
+
+    async def test_listing_is_newest_first(self, client: AsyncClient) -> None:
+        token = await register(client)
+        await create_widget(client, token, title="Oldest")
+        await create_widget(client, token, title="Newest")
+
+        response = await client.get(WIDGETS_URL, headers=auth_header(token))
+
+        assert response.status_code == 200
+        assert [widget["title"] for widget in response.json()] == ["Newest", "Oldest"]
+
+    async def test_listing_with_no_widgets_is_an_empty_list(
+        self, client: AsyncClient
+    ) -> None:
+        """Absence of widgets is not an error — 200 with [], not 404."""
+        token = await register(client)
+
+        response = await client.get(WIDGETS_URL, headers=auth_header(token))
+
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_list_entries_omit_form_fields(self, client: AsyncClient) -> None:
+        """The list is a summary; fields cost a query per row and go unused."""
+        token = await register(client)
+        await create_widget(client, token)
+
+        response = await client.get(WIDGETS_URL, headers=auth_header(token))
+
+        assert response.status_code == 200
+        assert "form_fields" not in response.json()[0]
+
+    async def test_unauthenticated_listing_is_rejected(
+        self, client: AsyncClient
+    ) -> None:
+        response = await client.get(WIDGETS_URL)
+
+        assert response.status_code == 401
+
+
+class TestRetrieveWidget:
+    async def test_own_widget_is_returned_with_its_fields(
+        self, client: AsyncClient
+    ) -> None:
+        token = await register(client)
+        created = await create_widget(client, token)
+
+        response = await client.get(
+            f"{WIDGETS_URL}/{created['id']}", headers=auth_header(token)
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == created["id"]
+        assert body["title"] == "Newsletter Signup"
+        assert [field["field_name"] for field in body["form_fields"]] == [
+            "email",
+            "full_name",
+        ]
+
+    async def test_fields_come_back_in_display_order(self, client: AsyncClient) -> None:
+        """Postgres returns rows unordered, so display_order must be applied."""
+        token = await register(client)
+        created = await create_widget(
+            client,
+            token,
+            form_fields=[
+                {
+                    "field_name": "last",
+                    "label": "Last",
+                    "field_type": "text",
+                    "display_order": 20,
+                },
+                {
+                    "field_name": "first",
+                    "label": "First",
+                    "field_type": "text",
+                    "display_order": 1,
+                },
+                {
+                    "field_name": "middle",
+                    "label": "Middle",
+                    "field_type": "text",
+                    "display_order": 10,
+                },
+            ],
+        )
+
+        response = await client.get(
+            f"{WIDGETS_URL}/{created['id']}", headers=auth_header(token)
+        )
+
+        assert response.status_code == 200
+        fields = response.json()["form_fields"]
+        assert [field["field_name"] for field in fields] == ["first", "middle", "last"]
+        assert [field["display_order"] for field in fields] == [1, 10, 20]
+
+    async def test_another_customers_widget_is_404_not_403(
+        self, client: AsyncClient
+    ) -> None:
+        """403 would confirm the id exists — an oracle across tenants (FR1.4)."""
+        owner_token = await register(client)
+        widget = await create_widget(client, owner_token)
+
+        intruder_token = await register_other(client)
+
+        response = await client.get(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(intruder_token)
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Widget not found"
+
+    async def test_unknown_id_is_indistinguishable_from_someone_elses(
+        self, client: AsyncClient
+    ) -> None:
+        """Same status and same body, or the difference itself leaks existence."""
+        owner_token = await register(client)
+        widget = await create_widget(client, owner_token)
+        intruder_token = await register_other(client)
+
+        cross_tenant = await client.get(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(intruder_token)
+        )
+        nonexistent = await client.get(
+            f"{WIDGETS_URL}/{uuid.uuid4()}", headers=auth_header(intruder_token)
+        )
+
+        assert cross_tenant.status_code == nonexistent.status_code == 404
+        assert cross_tenant.json() == nonexistent.json()
+
+    async def test_malformed_id_is_rejected(self, client: AsyncClient) -> None:
+        token = await register(client)
+
+        response = await client.get(
+            f"{WIDGETS_URL}/not-a-uuid", headers=auth_header(token)
+        )
+
+        assert response.status_code == 422
+
+    async def test_unauthenticated_retrieval_is_rejected(
+        self, client: AsyncClient
+    ) -> None:
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.get(f"{WIDGETS_URL}/{widget['id']}")
+
+        assert response.status_code == 401
