@@ -18,6 +18,8 @@ LOGIN_URL = "/api/v1/auth/login"
 ME_URL = "/api/v1/auth/me"
 CHANGE_PASSWORD_URL = "/api/v1/auth/change-password"
 
+OTHER_EMAIL = "rival@other.example"
+
 PASSWORD = "correct-horse-battery"
 
 
@@ -355,3 +357,174 @@ class TestChangePassword:
         )
 
         assert response.status_code == 422
+
+
+class TestUpdateProfile:
+    async def test_organization_name_is_updated(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.patch(
+            ME_URL,
+            headers=auth_header(token),
+            json={"organization_name": "Acme Renamed"},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["organization_name"] == "Acme Renamed"
+        # Untouched field must survive a partial update.
+        assert body["email"] == "owner@acme.example"
+        assert "password_hash" not in body
+
+        customer = (await db_session.execute(select(Customer))).scalar_one()
+        assert customer.organization_name == "Acme Renamed"
+
+    async def test_email_is_updated_and_usable_at_login(
+        self, client: AsyncClient
+    ) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.patch(
+            ME_URL, headers=auth_header(token), json={"email": OTHER_EMAIL}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["email"] == OTHER_EMAIL
+
+        with_new = await client.post(
+            LOGIN_URL, json={"email": OTHER_EMAIL, "password": PASSWORD}
+        )
+        with_old = await client.post(
+            LOGIN_URL, json={"email": "owner@acme.example", "password": PASSWORD}
+        )
+
+        assert with_new.status_code == 200
+        assert with_old.status_code == 401
+
+    async def test_both_fields_update_together(self, client: AsyncClient) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.patch(
+            ME_URL,
+            headers=auth_header(token),
+            json={"organization_name": "Both Changed", "email": OTHER_EMAIL},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["organization_name"] == "Both Changed"
+        assert response.json()["email"] == OTHER_EMAIL
+
+    async def test_email_taken_by_another_customer_is_rejected(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        await client.post(
+            SIGNUP_URL,
+            json=signup_payload(email=OTHER_EMAIL, organization_name="Rival"),
+        )
+
+        response = await client.patch(
+            ME_URL, headers=auth_header(token), json={"email": OTHER_EMAIL}
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Email already registered"
+
+        # The rejected update must not have altered the original row.
+        customer = (
+            await db_session.execute(
+                select(Customer).where(Customer.email == "owner@acme.example")
+            )
+        ).scalar_one()
+        assert customer.organization_name == "Acme Widgets"
+
+    async def test_taken_email_is_rejected_regardless_of_case(
+        self, client: AsyncClient
+    ) -> None:
+        """Uniqueness must survive casing, exactly as it does at signup."""
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        await client.post(
+            SIGNUP_URL,
+            json=signup_payload(email=OTHER_EMAIL, organization_name="Rival"),
+        )
+
+        response = await client.patch(
+            ME_URL, headers=auth_header(token), json={"email": OTHER_EMAIL.upper()}
+        )
+
+        assert response.status_code == 409
+
+    async def test_reclaiming_your_own_email_is_allowed(
+        self, client: AsyncClient
+    ) -> None:
+        """Submitting the unchanged address must not collide with yourself."""
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.patch(
+            ME_URL,
+            headers=auth_header(token),
+            json={"email": "owner@acme.example", "organization_name": "Same Email"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["organization_name"] == "Same Email"
+
+    async def test_email_is_normalized_before_storage(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.patch(
+            ME_URL, headers=auth_header(token), json={"email": "  MiXeD@Case.EXAMPLE  "}
+        )
+
+        assert response.status_code == 200
+        customer = (await db_session.execute(select(Customer))).scalar_one()
+        assert customer.email == "mixed@case.example"
+
+    async def test_unauthenticated_request_is_rejected(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post(SIGNUP_URL, json=signup_payload())
+
+        response = await client.patch(ME_URL, json={"organization_name": "Nope"})
+
+        assert response.status_code == 401
+
+    @pytest.mark.parametrize(
+        ("label", "payload"),
+        [
+            ("empty body", {}),
+            ("unknown field only", {"organizationName": "typo'd key"}),
+            ("null organization_name", {"organization_name": None}),
+            ("null email", {"email": None}),
+            ("blank organization_name", {"organization_name": ""}),
+            ("invalid email", {"email": "not-an-email"}),
+        ],
+    )
+    async def test_invalid_update_is_rejected(
+        self, client: AsyncClient, label: str, payload: dict
+    ) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.patch(ME_URL, headers=auth_header(token), json=payload)
+
+        assert response.status_code == 422, label

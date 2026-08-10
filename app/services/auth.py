@@ -14,6 +14,7 @@ from app.schemas.customer import (
     CustomerLogin,
     CustomerPasswordChange,
     CustomerSignup,
+    CustomerUpdate,
 )
 
 # Verified against when no customer matches, so a missing email costs the same
@@ -80,6 +81,45 @@ class AuthService:
 
     def issue_access_token(self, customer: Customer) -> str:
         return create_access_token(subject=str(customer.id))
+
+    async def update_profile(
+        self,
+        customer: Customer,
+        payload: CustomerUpdate,
+    ) -> Customer:
+        """Apply a partial profile update.
+
+        Only fields the client actually sent are touched, so omitting a field
+        leaves it alone rather than overwriting it with None.
+        """
+        fields = payload.model_dump(exclude_unset=True)
+
+        if "organization_name" in fields:
+            customer.organization_name = fields["organization_name"]
+
+        if "email" in fields:
+            email = self._normalize_email(fields["email"])
+            # Same uniqueness rule as signup. Skipped when the address is
+            # unchanged, otherwise a no-op update would collide with itself.
+            if email != customer.email:
+                if await self.customers.get_by_email(email) is not None:
+                    raise EmailAlreadyRegisteredError(email)
+                customer.email = email
+
+        # Read before commit: rollback expires the instance, and re-reading an
+        # expired attribute would emit lazy IO that raises inside the handler.
+        attempted_email = customer.email
+
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            # Mirrors signup: the unique index is the real arbiter under
+            # concurrent updates, so its violation is the same conflict.
+            await self.session.rollback()
+            raise EmailAlreadyRegisteredError(attempted_email) from exc
+
+        await self.session.refresh(customer)
+        return customer
 
     async def change_password(
         self,

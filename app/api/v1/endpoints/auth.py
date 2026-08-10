@@ -8,6 +8,7 @@ from app.schemas.customer import (
     CustomerPasswordChange,
     CustomerRead,
     CustomerSignup,
+    CustomerUpdate,
     Token,
 )
 from app.services.auth import (
@@ -67,6 +68,28 @@ async def login(payload: CustomerLogin, db: DbSession) -> Token:
 )
 async def read_current_customer(customer: CurrentCustomer) -> CustomerRead:
     return CustomerRead.model_validate(customer)
+
+
+@router.patch(
+    "/me",
+    response_model=CustomerRead,
+    summary="Update the authenticated customer's profile",
+)
+async def update_current_customer(
+    payload: CustomerUpdate,
+    customer: CurrentCustomer,
+    db: DbSession,
+) -> CustomerRead:
+    service = AuthService(db)
+    try:
+        updated = await service.update_profile(customer, payload)
+    except EmailAlreadyRegisteredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        ) from exc
+
+    return CustomerRead.model_validate(updated)
 
 
 @router.post(
