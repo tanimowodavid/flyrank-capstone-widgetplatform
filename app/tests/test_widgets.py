@@ -1,10 +1,11 @@
-"""Tests for widget creation, listing, retrieval, update and deletion.
+"""Tests for widget creation, listing, retrieval, update, deletion and embeds.
 
 Ownership is the property under test throughout: a widget belongs to the caller
 identified by the access token, nothing in the request body can change that, and
 another tenant's widget is indistinguishable from one that does not exist.
 """
 
+import re
 import uuid
 
 import pytest
@@ -12,6 +13,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, settings
 from app.models.form_field import FormField
 from app.models.submission import Submission
 from app.models.widget import Widget
@@ -1015,3 +1017,91 @@ class TestDeleteWidget:
 
         assert response.status_code == 401
         assert len((await db_session.execute(select(Widget))).scalars().all()) == 1
+
+
+class TestEmbedSnippet:
+    async def test_snippet_is_present_on_the_detail_response(
+        self, client: AsyncClient
+    ) -> None:
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.get(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(token)
+        )
+
+        assert response.status_code == 200
+        assert response.json()["embed_snippet"] == (
+            f'<script src="{settings.WIDGET_EMBED_BASE_URL}'
+            f'/widget.js?id={widget["id"]}"></script>'
+        )
+
+    async def test_the_snippet_carries_this_widgets_id(
+        self, client: AsyncClient
+    ) -> None:
+        """The id in the snippet must be the id of the widget being fetched."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.get(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(token)
+        )
+
+        snippet = response.json()["embed_snippet"]
+        assert widget["id"] in snippet
+
+    async def test_the_snippet_survives_a_field_replacement(
+        self, client: AsyncClient
+    ) -> None:
+        """The snippet is keyed by id, so editing fields must not change it."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={"form_fields": []},
+        )
+        response = await client.get(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(token)
+        )
+
+        assert response.json()["embed_snippet"] == (
+            f'<script src="{settings.WIDGET_EMBED_BASE_URL}'
+            f'/widget.js?id={widget["id"]}"></script>'
+        )
+
+    async def test_the_list_response_has_no_snippet(self, client: AsyncClient) -> None:
+        """The snippet only makes sense for one widget, so the list omits it."""
+        token = await register(client)
+        await create_widget(client, token)
+
+        response = await client.get(WIDGETS_URL, headers=auth_header(token))
+
+        assert response.status_code == 200
+        assert "embed_snippet" not in response.json()[0]
+
+    async def test_the_snippet_matches_the_documented_shape(
+        self, client: AsyncClient
+    ) -> None:
+        """Pins the literal format, not just the interpolation of it."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.get(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(token)
+        )
+
+        assert re.fullmatch(
+            r'<script src="https://[^"?\s]+/widget\.js\?id='
+            r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}">'
+            r"</script>",
+            response.json()["embed_snippet"],
+        )
+
+    def test_a_trailing_slash_on_the_base_url_is_normalised(self) -> None:
+        """Or the snippet would carry "//widget.js" for a URL set with a slash."""
+        assert (
+            Settings(WIDGET_EMBED_BASE_URL="https://cdn.example.com/").WIDGET_EMBED_BASE_URL
+            == "https://cdn.example.com"
+        )

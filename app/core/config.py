@@ -7,7 +7,7 @@ varies per environment — and no secret — is hardcoded anywhere else in the a
 from functools import lru_cache
 from urllib.parse import quote_plus
 
-from pydantic import computed_field
+from pydantic import computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     # run can flush its counters without touching development state.
     REDIS_DB: int = 0
     REDIS_TEST_DB: int = 15
+
+    # Base URL the embed snippet points at. Its own setting rather than something
+    # derived from the incoming request: widget.js is a static asset that may well
+    # be served from a CDN, so the loader's host is not necessarily the API's.
+    WIDGET_EMBED_BASE_URL: str = "https://your-domain.com"
+
+    @field_validator("WIDGET_EMBED_BASE_URL")
+    @classmethod
+    def strip_trailing_slash(cls, value: str) -> str:
+        """Normalise once here so callers can always append "/widget.js"."""
+        return value.rstrip("/")
 
     # Login rate limit, as a limits-library string ("5/minute", "100/hour").
     # Configurable so it can be tightened in production without a code change.

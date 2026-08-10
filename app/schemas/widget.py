@@ -4,7 +4,16 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
+
+from app.core.config import settings
 
 # Literal rather than a database enum: the set is small, app-level, and changing
 # it should be a code change with a migration-free deploy. Pydantic rejects
@@ -176,6 +185,21 @@ class WidgetRead(BaseModel):
 
 
 class WidgetReadDetail(WidgetRead):
-    """Widget with its full field set, for the retrieve endpoint."""
+    """Widget with its full field set and its embed snippet."""
 
     form_fields: list[FormFieldRead] = Field(default_factory=list)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def embed_snippet(self) -> str:
+        """The <script> tag the owner pastes into their site.
+
+        Derived from id rather than stored: it is a formatting of data the
+        response already carries, so persisting it would mean a column that can
+        disagree with the id beside it, plus a migration every time the loader's
+        URL changes.
+        """
+        return (
+            f'<script src="{settings.WIDGET_EMBED_BASE_URL}'
+            f'/widget.js?id={self.id}"></script>'
+        )
