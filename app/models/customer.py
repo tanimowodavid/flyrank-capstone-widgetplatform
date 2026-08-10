@@ -5,7 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -41,6 +41,20 @@ class Customer(Base):
         # Server-side default only fires on INSERT; onupdate keeps the column
         # honest on every ORM UPDATE.
         onupdate=func.now(),
+    )
+
+    # passive_deletes=True leaves the delete to the database's ON DELETE CASCADE.
+    # Without it SQLAlchemy would load every child row and try to null its FK,
+    # which fails against a NOT NULL column and defeats the point of the cascade.
+    widgets: Mapped[list["Widget"]] = relationship(  # noqa: F821
+        back_populates="customer",
+        cascade="all, delete",
+        passive_deletes=True,
+    )
+    submissions: Mapped[list["Submission"]] = relationship(  # noqa: F821
+        back_populates="customer",
+        cascade="all, delete",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:

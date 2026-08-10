@@ -92,6 +92,15 @@ async def update_current_customer(
     return CustomerRead.model_validate(updated)
 
 
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Permanently delete the authenticated customer's account",
+)
+async def delete_current_customer(customer: CurrentCustomer, db: DbSession) -> None:
+    await AuthService(db).delete_account(customer)
+
+
 @router.post(
     "/change-password",
     response_model=CustomerRead,

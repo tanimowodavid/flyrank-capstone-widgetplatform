@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_access_token, verify_password
 from app.models.customer import Customer
+from app.models.form_field import FormField
+from app.models.submission import Submission
+from app.models.widget import Widget
 
 # No asyncio marker: pyproject sets asyncio_mode = "auto".
 
@@ -528,3 +531,155 @@ class TestUpdateProfile:
         response = await client.patch(ME_URL, headers=auth_header(token), json=payload)
 
         assert response.status_code == 422, label
+
+
+async def seed_widget_tree(
+    session: AsyncSession, customer_id: uuid.UUID
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Insert a widget with one form field and one submission for `customer_id`.
+
+    Widget endpoints do not exist yet, so the cascade tests build the child rows
+    directly. Returns the three ids so a test can assert they are gone.
+    """
+    widget = Widget(
+        customer_id=customer_id,
+        widget_type="signup_form",
+        title="Newsletter Signup",
+    )
+    session.add(widget)
+    await session.flush()
+
+    form_field = FormField(
+        widget_id=widget.id,
+        field_name="email",
+        label="Email address",
+        field_type="email",
+    )
+    submission = Submission(
+        widget_id=widget.id,
+        customer_id=customer_id,
+        payload={"email": "visitor@example.com"},
+    )
+    session.add_all([form_field, submission])
+    await session.commit()
+
+    return widget.id, form_field.id, submission.id
+
+
+class TestDeleteAccount:
+    async def test_delete_removes_the_customer(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+
+        response = await client.delete(ME_URL, headers=auth_header(token))
+
+        assert response.status_code == 204
+        assert not response.content
+
+        remaining = (await db_session.execute(select(Customer))).scalars().all()
+        assert remaining == []
+
+    async def test_delete_cascades_to_widgets_and_submissions(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """The database's ON DELETE CASCADE must clear the whole owned tree."""
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        customer_id = uuid.UUID(
+            (await client.get(ME_URL, headers=auth_header(token))).json()["id"]
+        )
+        widget_id, form_field_id, submission_id = await seed_widget_tree(
+            db_session, customer_id
+        )
+
+        response = await client.delete(ME_URL, headers=auth_header(token))
+
+        assert response.status_code == 204
+
+        # Read through a fresh transaction so these are not served from identity map.
+        await db_session.commit()
+        assert await db_session.get(Widget, widget_id) is None
+        assert await db_session.get(FormField, form_field_id) is None
+        assert await db_session.get(Submission, submission_id) is None
+
+    async def test_delete_leaves_other_customers_untouched(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Tenant isolation: one account's deletion must not touch another's data."""
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        other_token = (
+            await client.post(
+                SIGNUP_URL,
+                json=signup_payload(email=OTHER_EMAIL, organization_name="Rival"),
+            )
+        ).json()["access_token"]
+
+        other_id = uuid.UUID(
+            (await client.get(ME_URL, headers=auth_header(other_token))).json()["id"]
+        )
+        other_widget_id, _, other_submission_id = await seed_widget_tree(
+            db_session, other_id
+        )
+
+        response = await client.delete(ME_URL, headers=auth_header(token))
+
+        assert response.status_code == 204
+
+        await db_session.commit()
+        assert await db_session.get(Widget, other_widget_id) is not None
+        assert await db_session.get(Submission, other_submission_id) is not None
+        assert await db_session.get(Customer, other_id) is not None
+
+    async def test_deleted_customer_cannot_log_in(self, client: AsyncClient) -> None:
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        await client.delete(ME_URL, headers=auth_header(token))
+
+        response = await client.post(
+            LOGIN_URL, json={"email": "owner@acme.example", "password": PASSWORD}
+        )
+
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Invalid credentials"
+
+    async def test_token_stops_working_after_deletion(
+        self, client: AsyncClient
+    ) -> None:
+        """The subject row is gone, so the still-unexpired token must not resolve."""
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        await client.delete(ME_URL, headers=auth_header(token))
+
+        response = await client.get(ME_URL, headers=auth_header(token))
+
+        assert response.status_code == 401
+
+    async def test_email_is_reusable_after_deletion(self, client: AsyncClient) -> None:
+        """A hard delete frees the address; the unique index must not block reuse."""
+        token = (await client.post(SIGNUP_URL, json=signup_payload())).json()[
+            "access_token"
+        ]
+        await client.delete(ME_URL, headers=auth_header(token))
+
+        response = await client.post(SIGNUP_URL, json=signup_payload())
+
+        assert response.status_code == 201
+
+    async def test_unauthenticated_request_is_rejected(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await client.post(SIGNUP_URL, json=signup_payload())
+
+        response = await client.delete(ME_URL)
+
+        assert response.status_code == 401
+        # The account must still be there.
+        assert (await db_session.execute(select(Customer))).scalar_one() is not None

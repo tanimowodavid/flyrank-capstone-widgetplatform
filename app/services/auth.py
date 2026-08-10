@@ -82,6 +82,16 @@ class AuthService:
     def issue_access_token(self, customer: Customer) -> str:
         return create_access_token(subject=str(customer.id))
 
+    async def delete_account(self, customer: Customer) -> None:
+        """Hard-delete the customer and everything the database cascades from it.
+
+        No application-level cleanup of widgets or submissions: the ON DELETE
+        CASCADE on their foreign keys is what removes them, so the guarantee
+        holds for any delete path, not just this one.
+        """
+        await self.customers.delete_by_id(customer.id)
+        await self.session.commit()
+
     async def update_profile(
         self,
         customer: Customer,

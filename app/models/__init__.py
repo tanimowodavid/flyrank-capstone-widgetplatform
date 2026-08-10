@@ -10,5 +10,8 @@ also build the engine.
 
 from app.db.base import Base
 from app.models.customer import Customer
+from app.models.form_field import FormField
+from app.models.submission import Submission
+from app.models.widget import Widget
 
-__all__ = ["Base", "Customer"]
+__all__ = ["Base", "Customer", "FormField", "Submission", "Widget"]
