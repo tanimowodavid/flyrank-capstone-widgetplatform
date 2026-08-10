@@ -1,4 +1,4 @@
-"""Tests for widget creation, listing and retrieval.
+"""Tests for widget creation, listing, retrieval, update and deletion.
 
 Ownership is the property under test throughout: a widget belongs to the caller
 identified by the access token, nothing in the request body can change that, and
@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.form_field import FormField
+from app.models.submission import Submission
 from app.models.widget import Widget
 
 SIGNUP_URL = "/api/v1/auth/signup"
@@ -622,3 +623,395 @@ class TestRetrieveWidget:
         response = await client.get(f"{WIDGETS_URL}/{widget['id']}")
 
         assert response.status_code == 401
+
+
+class TestUpdateWidget:
+    async def test_attributes_are_updated(self, client: AsyncClient) -> None:
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={"title": "Renamed", "theme_color": "#ff0000"},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["title"] == "Renamed"
+        assert body["theme_color"] == "#ff0000"
+
+    async def test_omitted_attributes_are_left_alone(
+        self, client: AsyncClient
+    ) -> None:
+        """PATCH, not PUT: unsent keys must not be reset to their defaults."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={"title": "Renamed"},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["description"] == "Join our list"
+        assert body["button_text"] == "Subscribe"
+        assert body["theme_color"] == "#3366ff"
+        assert body["widget_type"] == "signup_form"
+
+    async def test_nullable_attributes_can_be_cleared(
+        self, client: AsyncClient
+    ) -> None:
+        """An explicit null on a nullable column means "clear it", not "ignore"."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={"description": None, "button_text": None},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["description"] is None
+        assert response.json()["button_text"] is None
+
+    async def test_fields_are_fully_replaced(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """The sent set becomes the whole set — old rows go, new rows arrive."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+        original_field_ids = {field["id"] for field in widget["form_fields"]}
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={
+                "form_fields": [
+                    {
+                        "field_name": "company",
+                        "label": "Company",
+                        "field_type": "text",
+                        "display_order": 0,
+                    },
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        fields = response.json()["form_fields"]
+        assert [field["field_name"] for field in fields] == ["company"]
+        # New rows, not edited ones: replacement means the old ids are gone.
+        assert original_field_ids.isdisjoint({field["id"] for field in fields})
+
+        stored = (await db_session.execute(select(FormField))).scalars().all()
+        assert len(stored) == 1
+        assert stored[0].field_name == "company"
+
+    async def test_replacing_fields_keeps_them_ordered(
+        self, client: AsyncClient
+    ) -> None:
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={
+                "form_fields": [
+                    {
+                        "field_name": "third",
+                        "label": "Third",
+                        "field_type": "text",
+                        "display_order": 30,
+                    },
+                    {
+                        "field_name": "first",
+                        "label": "First",
+                        "field_type": "text",
+                        "display_order": 10,
+                    },
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        fields = response.json()["form_fields"]
+        assert [field["field_name"] for field in fields] == ["first", "third"]
+
+    async def test_empty_field_list_clears_the_form(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """[] is a real instruction — a signup form becoming a bare CTA."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={"widget_type": "cta_popover", "form_fields": []},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["form_fields"] == []
+        assert (await db_session.execute(select(FormField))).scalars().all() == []
+
+    async def test_omitting_form_fields_leaves_them_untouched(
+        self, client: AsyncClient
+    ) -> None:
+        """Absent is not the same as []: only one of them wipes the form."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+        original_field_ids = {field["id"] for field in widget["form_fields"]}
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={"title": "Renamed"},
+        )
+
+        assert response.status_code == 200
+        fields = response.json()["form_fields"]
+        assert {field["id"] for field in fields} == original_field_ids
+
+    async def test_ownership_cannot_be_reassigned(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """customer_id is not on WidgetUpdate, so sending it changes nothing."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+        rival_token = await register_other(client)
+        rival_id = (
+            await client.get("/api/v1/auth/me", headers=auth_header(rival_token))
+        ).json()["id"]
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={"title": "Renamed", "customer_id": rival_id},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["customer_id"] == widget["customer_id"]
+
+    async def test_cross_tenant_update_is_404(self, client: AsyncClient) -> None:
+        owner_token = await register(client)
+        widget = await create_widget(client, owner_token)
+        intruder_token = await register_other(client)
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(intruder_token),
+            json={"title": "Hijacked"},
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Widget not found"
+
+    async def test_a_rejected_cross_tenant_update_changes_nothing(
+        self, client: AsyncClient
+    ) -> None:
+        owner_token = await register(client)
+        widget = await create_widget(client, owner_token)
+        intruder_token = await register_other(client)
+
+        await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(intruder_token),
+            json={"title": "Hijacked", "form_fields": []},
+        )
+
+        after = await client.get(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(owner_token)
+        )
+        assert after.json()["title"] == "Newsletter Signup"
+        assert len(after.json()["form_fields"]) == 2
+
+    @pytest.mark.parametrize(
+        ("label", "body"),
+        [
+            ("empty body", {}),
+            ("unknown key only", {"widgetType": "contact_form"}),
+            ("null title", {"title": None}),
+            ("blank title", {"title": ""}),
+            ("invalid widget_type", {"widget_type": "survey"}),
+            (
+                "invalid field_type",
+                {
+                    "form_fields": [
+                        {"field_name": "x", "label": "X", "field_type": "date"}
+                    ]
+                },
+            ),
+            (
+                "duplicate field names",
+                {
+                    "form_fields": [
+                        {"field_name": "email", "label": "A", "field_type": "email"},
+                        {"field_name": "Email", "label": "B", "field_type": "text"},
+                    ]
+                },
+            ),
+        ],
+    )
+    async def test_invalid_updates_are_rejected(
+        self, client: AsyncClient, label: str, body: dict
+    ) -> None:
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(token), json=body
+        )
+
+        assert response.status_code == 422, label
+
+    async def test_a_rejected_update_leaves_fields_intact(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Validation runs before the delete, so a 422 must not wipe the form."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}",
+            headers=auth_header(token),
+            json={
+                "form_fields": [
+                    {"field_name": "ok", "label": "OK", "field_type": "text"},
+                    {"field_name": "bad", "label": "Bad", "field_type": "nonsense"},
+                ]
+            },
+        )
+
+        assert response.status_code == 422
+        stored = (await db_session.execute(select(FormField))).scalars().all()
+        assert len(stored) == 2
+
+    async def test_unauthenticated_update_is_rejected(
+        self, client: AsyncClient
+    ) -> None:
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.patch(
+            f"{WIDGETS_URL}/{widget['id']}", json={"title": "Renamed"}
+        )
+
+        assert response.status_code == 401
+
+
+class TestDeleteWidget:
+    async def test_widget_is_deleted(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.delete(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(token)
+        )
+
+        assert response.status_code == 204
+        assert (await db_session.execute(select(Widget))).scalars().all() == []
+
+        follow_up = await client.get(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(token)
+        )
+        assert follow_up.status_code == 404
+
+    async def test_form_fields_are_cascade_deleted(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.delete(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(token)
+        )
+
+        assert response.status_code == 204
+        assert (await db_session.execute(select(FormField))).scalars().all() == []
+
+    async def test_submissions_survive_with_a_null_widget_id(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A captured lead outlives the form it arrived through (ON DELETE SET NULL)."""
+        token = await register(client)
+        widget = await create_widget(client, token)
+        customer_id = uuid.UUID(widget["customer_id"])
+
+        submission = Submission(
+            widget_id=uuid.UUID(widget["id"]),
+            customer_id=customer_id,
+            payload={"email": "lead@example.com"},
+        )
+        db_session.add(submission)
+        await db_session.commit()
+
+        response = await client.delete(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(token)
+        )
+
+        assert response.status_code == 204
+
+        db_session.expire_all()
+        survivors = (await db_session.execute(select(Submission))).scalars().all()
+        assert len(survivors) == 1
+        assert survivors[0].widget_id is None
+        # The data itself is the point of keeping the row, not just the row.
+        assert survivors[0].payload == {"email": "lead@example.com"}
+        assert survivors[0].customer_id == customer_id
+
+    async def test_cross_tenant_delete_is_404(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        owner_token = await register(client)
+        widget = await create_widget(client, owner_token)
+        intruder_token = await register_other(client)
+
+        response = await client.delete(
+            f"{WIDGETS_URL}/{widget['id']}", headers=auth_header(intruder_token)
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Widget not found"
+        assert len((await db_session.execute(select(Widget))).scalars().all()) == 1
+
+    async def test_deleting_one_widget_leaves_the_others(
+        self, client: AsyncClient
+    ) -> None:
+        token = await register(client)
+        doomed = await create_widget(client, token, title="Doomed")
+        kept = await create_widget(client, token, title="Kept")
+
+        response = await client.delete(
+            f"{WIDGETS_URL}/{doomed['id']}", headers=auth_header(token)
+        )
+
+        assert response.status_code == 204
+        listing = await client.get(WIDGETS_URL, headers=auth_header(token))
+        assert [widget["id"] for widget in listing.json()] == [kept["id"]]
+
+    async def test_deleting_an_unknown_id_is_404(self, client: AsyncClient) -> None:
+        token = await register(client)
+
+        response = await client.delete(
+            f"{WIDGETS_URL}/{uuid.uuid4()}", headers=auth_header(token)
+        )
+
+        assert response.status_code == 404
+
+    async def test_unauthenticated_delete_is_rejected(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token = await register(client)
+        widget = await create_widget(client, token)
+
+        response = await client.delete(f"{WIDGETS_URL}/{widget['id']}")
+
+        assert response.status_code == 401
+        assert len((await db_session.execute(select(Widget))).scalars().all()) == 1

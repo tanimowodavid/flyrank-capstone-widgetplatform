@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.widget import Widget
 from app.repositories.widget import WidgetRepository
-from app.schemas.widget import FormFieldCreate, WidgetCreate
+from app.schemas.widget import FormFieldCreate, WidgetCreate, WidgetUpdate
 
 
 class WidgetNotFoundError(Exception):
@@ -60,6 +60,53 @@ class WidgetService:
 
     async def list_for_customer(self, customer_id: uuid.UUID) -> Sequence[Widget]:
         return await self.widgets.list_for_customer(customer_id)
+
+    async def update(
+        self, widget_id: uuid.UUID, customer_id: uuid.UUID, payload: WidgetUpdate
+    ) -> Widget:
+        """Apply a partial update, replacing form fields wholesale if given.
+
+        Fields are replaced rather than diffed: the client sends the complete
+        current set, the old rows are deleted, and new ones are inserted. Diffing
+        would mean matching old rows to new ones by field_name — but field_name is
+        itself editable, so a rename is indistinguishable from a delete plus an
+        add. Replacing sidesteps that ambiguity entirely.
+
+        Omitting form_fields leaves the existing set alone; sending [] clears it.
+        """
+        widget = await self.get_for_customer(widget_id, customer_id)
+
+        attributes = payload.model_dump(
+            exclude={"form_fields"}, exclude_unset=True
+        )
+        for name, value in attributes.items():
+            setattr(widget, name, value)
+
+        # Replacement is opt-in: `is None` distinguishes "key absent" from an
+        # explicit [], which means "this widget now collects nothing".
+        if payload.form_fields is not None:
+            await self.widgets.delete_form_fields(widget.id)
+            self.widgets.add_form_fields(
+                widget_id=widget.id,
+                fields=self._ordered_field_rows(payload.form_fields),
+            )
+
+        # One commit for the attribute changes, the deletes and the inserts: a
+        # failure mid-way must not leave a widget with half its fields replaced.
+        await self.session.commit()
+
+        return await self.get_for_customer(widget.id, customer_id)
+
+    async def delete(self, widget_id: uuid.UUID, customer_id: uuid.UUID) -> None:
+        """Delete a widget the caller owns.
+
+        Form fields go with it (ON DELETE CASCADE) but submissions do not: their
+        widget_id is ON DELETE SET NULL, so a captured lead outlives the form it
+        arrived through. Both behaviours are the database's, not this method's.
+        """
+        widget = await self.get_for_customer(widget_id, customer_id)
+        await self.widgets.delete(widget)
+        await self.session.commit()
 
     @staticmethod
     def _ordered_field_rows(fields: Sequence[FormFieldCreate]) -> list[dict]:

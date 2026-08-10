@@ -31,6 +31,13 @@ class WidgetRepository:
             # selectinload, not lazy access: form_fields is read while rendering
             # the response, and a lazy load there raises in an async session.
             .options(selectinload(Widget.form_fields))
+            # The session is created with expire_on_commit=False, so an already
+            # loaded widget keeps its old form_fields collection and this query
+            # would hand back the identity-mapped object untouched. After a
+            # full-replace update that means returning the fields that were just
+            # deleted. populate_existing makes the returned state the database's,
+            # rather than something each caller has to remember to refresh.
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 

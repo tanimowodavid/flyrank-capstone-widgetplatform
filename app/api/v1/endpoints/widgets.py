@@ -5,7 +5,12 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 
 from app.core.deps import CurrentCustomer, DbSession
-from app.schemas.widget import WidgetCreate, WidgetRead, WidgetReadDetail
+from app.schemas.widget import (
+    WidgetCreate,
+    WidgetRead,
+    WidgetReadDetail,
+    WidgetUpdate,
+)
 from app.services.widget import WidgetNotFoundError, WidgetService
 
 router = APIRouter(prefix="/widgets", tags=["widgets"])
@@ -67,3 +72,42 @@ async def read_widget(
         raise _not_found() from exc
 
     return WidgetReadDetail.model_validate(widget)
+
+
+@router.patch(
+    "/{widget_id}",
+    response_model=WidgetReadDetail,
+    summary="Update a widget, replacing its form fields",
+)
+async def update_widget(
+    widget_id: uuid.UUID,
+    payload: WidgetUpdate,
+    customer: CurrentCustomer,
+    db: DbSession,
+) -> WidgetReadDetail:
+    """Partial update. Sending form_fields replaces the whole set; omitting it
+    leaves the existing fields untouched."""
+    try:
+        widget = await WidgetService(db).update(widget_id, customer.id, payload)
+    except WidgetNotFoundError as exc:
+        raise _not_found() from exc
+
+    return WidgetReadDetail.model_validate(widget)
+
+
+@router.delete(
+    "/{widget_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a widget, preserving its submissions",
+)
+async def delete_widget(
+    widget_id: uuid.UUID,
+    customer: CurrentCustomer,
+    db: DbSession,
+) -> None:
+    """Removes the widget and its form fields. Submissions survive with a null
+    widget_id — a captured lead outlives the form it arrived through."""
+    try:
+        await WidgetService(db).delete(widget_id, customer.id)
+    except WidgetNotFoundError as exc:
+        raise _not_found() from exc

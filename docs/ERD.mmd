@@ -1,7 +1,9 @@
 erDiagram
     CUSTOMERS ||--o{ WIDGETS : owns
     WIDGETS ||--o{ FORM_FIELDS : contains
-    WIDGETS ||--o{ SUBMISSIONS : receives
+    %% Optional on the widget side: submissions.widget_id is nullable with
+    %% ON DELETE SET NULL, so a submission outlives the widget it arrived through.
+    WIDGETS |o--o{ SUBMISSIONS : receives
     CUSTOMERS ||--o{ SUBMISSIONS : owns
 
     CUSTOMERS {
@@ -36,7 +38,7 @@ erDiagram
     }
     SUBMISSIONS {
         uuid id PK
-        uuid widget_id FK
+        uuid widget_id FK "nullable — set null when the widget is deleted"
         uuid customer_id FK
         json payload
         string submitter_ip

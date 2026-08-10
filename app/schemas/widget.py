@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Literal rather than a database enum: the set is small, app-level, and changing
 # it should be a code change with a migration-free deploy. Pydantic rejects
@@ -42,6 +42,32 @@ class FormFieldCreate(BaseModel):
         return candidate
 
 
+def _reject_duplicate_field_names(
+    fields: list[FormFieldCreate] | None,
+) -> list[FormFieldCreate] | None:
+    """Reject duplicate field_names within one widget.
+
+    Submission payloads are keyed by field_name, so two fields sharing a name
+    would silently collapse into one value at submission time. Compared
+    case-insensitively: "Email" and "email" would be two distinct JSON keys but
+    are the same field to anyone reading the form.
+
+    Shared by create and update because a full-replace update can introduce a
+    collision just as easily as creation can.
+    """
+    if fields is None:
+        return fields
+
+    names = [field.field_name.lower() for field in fields]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(
+            f"field_name must be unique within a widget; duplicated: "
+            f"{', '.join(duplicates)}"
+        )
+    return fields
+
+
 class WidgetCreate(BaseModel):
     """A new widget and the complete set of fields it collects.
 
@@ -64,21 +90,56 @@ class WidgetCreate(BaseModel):
     def field_names_must_be_unique(
         cls, fields: list[FormFieldCreate]
     ) -> list[FormFieldCreate]:
-        """Reject duplicate field_names within one widget.
+        return _reject_duplicate_field_names(fields)
 
-        Submission payloads are keyed by field_name, so two fields sharing a name
-        would silently collapse into one value at submission time. Compared
-        case-insensitively: "Email" and "email" would be two distinct JSON keys
-        but are the same field to anyone reading the form.
+
+class WidgetUpdate(BaseModel):
+    """Partial update of a widget, and optionally a full replacement of its fields.
+
+    form_fields is all-or-nothing: omit the key and the existing fields are left
+    untouched; send it and it replaces the entire set. There is no way to edit a
+    single field in place — see WidgetService.update for why.
+    """
+
+    widget_type: WidgetType | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    button_text: str | None = Field(default=None, max_length=100)
+    theme_color: str | None = Field(default=None, max_length=20)
+    is_active: bool | None = None
+    form_fields: list[FormFieldCreate] | None = None
+
+    # Columns that are nullable in the database, so an explicit null on these is a
+    # real instruction ("clear this"), not a malformed request.
+    _CLEARABLE = frozenset({"description", "button_text", "theme_color"})
+
+    @field_validator("form_fields")
+    @classmethod
+    def field_names_must_be_unique(
+        cls, fields: list[FormFieldCreate] | None
+    ) -> list[FormFieldCreate] | None:
+        return _reject_duplicate_field_names(fields)
+
+    @model_validator(mode="after")
+    def reject_empty_and_invalid_nulls(self) -> "WidgetUpdate":
+        """Require at least one field, and forbid nulls on non-nullable columns.
+
+        Unknown keys are ignored by default, so without the first check a typo'd
+        field name ("widgetType") would return 200 having changed nothing — a
+        silent no-op the client reads as success.
         """
-        names = [field.field_name.lower() for field in fields]
-        duplicates = sorted({name for name in names if names.count(name) > 1})
-        if duplicates:
-            raise ValueError(
-                f"field_name must be unique within a widget; duplicated: "
-                f"{', '.join(duplicates)}"
-            )
-        return fields
+        if not self.model_fields_set:
+            raise ValueError("Provide at least one field to update")
+
+        nulled = sorted(
+            name
+            for name in self.model_fields_set
+            if getattr(self, name) is None and name not in self._CLEARABLE
+        )
+        if nulled:
+            raise ValueError(f"Field(s) may not be null: {', '.join(nulled)}")
+
+        return self
 
 
 class FormFieldRead(BaseModel):
