@@ -19,7 +19,7 @@ from app.core.config import settings
 # it should be a code change with a migration-free deploy. Pydantic rejects
 # anything outside it as a 422 before the request reaches the service layer.
 WidgetType = Literal["signup_form", "contact_form", "cta_popover"]
-FieldType = Literal["text", "email", "number", "textarea", "checkbox"]
+FieldType = Literal["text", "email", "number", "textarea"]
 
 
 class FormFieldCreate(BaseModel):
@@ -52,8 +52,8 @@ class FormFieldCreate(BaseModel):
 
 
 def _reject_duplicate_field_names(
-    fields: list[FormFieldCreate] | None,
-) -> list[FormFieldCreate] | None:
+    fields: list[FormFieldCreate],
+) -> list[FormFieldCreate]:
     """Reject duplicate field_names within one widget.
 
     Submission payloads are keyed by field_name, so two fields sharing a name
@@ -125,8 +125,8 @@ class WidgetUpdate(BaseModel):
     @field_validator("form_fields")
     @classmethod
     def field_names_must_be_unique(
-        cls, fields: list[FormFieldCreate] | None
-    ) -> list[FormFieldCreate] | None:
+        cls, fields: list[FormFieldCreate]
+    ) -> list[FormFieldCreate]:
         return _reject_duplicate_field_names(fields)
 
     @model_validator(mode="after")
