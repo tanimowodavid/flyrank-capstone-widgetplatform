@@ -12,6 +12,9 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models.customer import Customer
+from app.models.widget import Widget
+
 from app.db.base import Base
 
 

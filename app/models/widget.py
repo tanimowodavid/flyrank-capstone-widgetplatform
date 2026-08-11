@@ -12,6 +12,10 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models.customer import Customer
+from app.models.form_field import FormField
+from app.models.submission import Submission
+
 from app.db.base import Base
 
 
