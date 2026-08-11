@@ -10,6 +10,8 @@ from sqlalchemy import Boolean, ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models.widget import Widget
+
 from app.db.base import Base
 
 
@@ -44,7 +46,7 @@ class FormField(Base):
         server_default=text("0"),
     )
 
-    widget: Mapped["Widget"] = relationship(back_populates="form_fields")  # noqa: F821
+    widget: Mapped["Widget"] = relationship(back_populates="form_fields")
 
     def __repr__(self) -> str:
         return f"<FormField id={self.id} field_name={self.field_name!r}>"
