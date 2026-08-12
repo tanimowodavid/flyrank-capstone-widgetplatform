@@ -7,16 +7,21 @@ code, and so a later widget feature inherits the shape from docs/ERD.mmd.
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.customer import Customer
-from app.models.form_field import FormField
-from app.models.submission import Submission
-
 from app.db.base import Base
+
+# Import-time cycle otherwise: these modules import Widget right back. relationship()
+# resolves its target by name from the declarative registry, and ForeignKey by table
+# name, so the classes are only ever needed by type checkers.
+if TYPE_CHECKING:
+    from app.models.customer import Customer
+    from app.models.form_field import FormField
+    from app.models.submission import Submission
 
 
 class Widget(Base):
@@ -62,8 +67,8 @@ class Widget(Base):
 
     # passive_deletes tells SQLAlchemy not to load children and null their FKs on
     # delete; without it the ORM would undo the ON DELETE CASCADE above.
-    customer: Mapped["Customer"] = relationship(back_populates="widgets")  # noqa: F821
-    form_fields: Mapped[list["FormField"]] = relationship(  # noqa: F821
+    customer: Mapped["Customer"] = relationship(back_populates="widgets")
+    form_fields: Mapped[list["FormField"]] = relationship(
         back_populates="widget",
         cascade="all, delete",
         passive_deletes=True,
@@ -76,7 +81,7 @@ class Widget(Base):
     # deleting a widget orphans its submissions rather than destroying them — a
     # captured lead outlives the form it arrived through. passive_deletes leaves
     # the nulling to Postgres instead of having the ORM rewrite each row.
-    submissions: Mapped[list["Submission"]] = relationship(  # noqa: F821
+    submissions: Mapped[list["Submission"]] = relationship(
         back_populates="widget",
         passive_deletes=True,
     )

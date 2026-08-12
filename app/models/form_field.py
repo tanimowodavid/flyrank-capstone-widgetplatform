@@ -5,14 +5,18 @@ tree described in docs/ERD.mmd.
 """
 
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.widget import Widget
-
 from app.db.base import Base
+
+# Widget imports this module, so importing it back at runtime would deadlock the
+# import. SQLAlchemy resolves the relationship target by name instead.
+if TYPE_CHECKING:
+    from app.models.widget import Widget
 
 
 class FormField(Base):

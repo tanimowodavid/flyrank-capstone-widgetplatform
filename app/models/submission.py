@@ -7,15 +7,19 @@ submissions without joining through widgets on every query.
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.customer import Customer
-from app.models.widget import Widget
-
 from app.db.base import Base
+
+# Widget imports this module; importing it back at runtime would form a cycle.
+# Both relationship targets resolve by name from the declarative registry.
+if TYPE_CHECKING:
+    from app.models.customer import Customer
+    from app.models.widget import Widget
 
 
 class Submission(Base):
@@ -68,8 +72,8 @@ class Submission(Base):
         server_default=func.now(),
     )
 
-    widget: Mapped["Widget"] = relationship(back_populates="submissions")  # noqa: F821
-    customer: Mapped["Customer"] = relationship(  # noqa: F821
+    widget: Mapped["Widget"] = relationship(back_populates="submissions")
+    customer: Mapped["Customer"] = relationship(
         back_populates="submissions"
     )
 

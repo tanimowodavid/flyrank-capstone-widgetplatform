@@ -2,12 +2,18 @@
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+# Both modules import Customer, so these stay type-check only.
+if TYPE_CHECKING:
+    from app.models.submission import Submission
+    from app.models.widget import Widget
 
 
 class Customer(Base):
@@ -46,12 +52,12 @@ class Customer(Base):
     # passive_deletes=True leaves the delete to the database's ON DELETE CASCADE.
     # Without it SQLAlchemy would load every child row and try to null its FK,
     # which fails against a NOT NULL column and defeats the point of the cascade.
-    widgets: Mapped[list["Widget"]] = relationship(  # noqa: F821
+    widgets: Mapped[list["Widget"]] = relationship(
         back_populates="customer",
         cascade="all, delete",
         passive_deletes=True,
     )
-    submissions: Mapped[list["Submission"]] = relationship(  # noqa: F821
+    submissions: Mapped[list["Submission"]] = relationship(
         back_populates="customer",
         cascade="all, delete",
         passive_deletes=True,
