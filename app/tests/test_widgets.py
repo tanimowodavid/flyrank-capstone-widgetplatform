@@ -300,7 +300,9 @@ class TestCreateWidgetValidation:
 
     @pytest.mark.parametrize(
         "field_type",
-        ["date", "EMAIL", "", "select", "file", "password"],
+        # checkbox was supported once and deliberately dropped; it is listed here
+        # so reintroducing it has to be a conscious change to this test.
+        ["date", "EMAIL", "", "select", "file", "password", "checkbox"],
     )
     async def test_invalid_field_type_is_rejected(
         self, client: AsyncClient, field_type: str
@@ -337,7 +339,7 @@ class TestCreateWidgetValidation:
         self, client: AsyncClient
     ) -> None:
         token = await register(client)
-        types = ["text", "email", "number", "textarea", "checkbox"]
+        types = ["text", "email", "number", "textarea"]
 
         response = await client.post(
             WIDGETS_URL,
