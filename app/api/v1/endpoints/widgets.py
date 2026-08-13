@@ -39,6 +39,8 @@ async def create_widget(
     customer: CurrentCustomer,
     db: DbSession,
 ) -> WidgetReadDetail:
+    # TODO: FR2.1 - embed_snippet in response will work once delivery endpoints are implemented
+    # The snippet points to /public/widgets/{widget_id}/config which is not yet implemented
     widget = await WidgetService(db).create(customer.id, payload)
     return WidgetReadDetail.model_validate(widget)
 

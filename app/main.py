@@ -24,6 +24,10 @@ app = FastAPI(
 
 # Before include_router: the exception handler must be registered on the app
 # that ends up serving the limited routes.
+# TODO: FR2.4 - Add CORS middleware for public endpoints (Path B and Path C)
+# Public delivery endpoints and submission endpoint must accept requests from any origin
+# Use fastapi.middleware.cors.CORSMiddleware with allow_origins=["*"]
+# OR configure a whitelist of customer websites if known in advance
 init_rate_limiting(app)
 
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)

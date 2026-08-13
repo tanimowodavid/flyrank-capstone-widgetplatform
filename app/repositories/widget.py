@@ -41,6 +41,20 @@ class WidgetRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id_public(self, widget_id: uuid.UUID) -> Widget | None:
+        """Fetch one widget with its fields for public delivery (no auth).
+
+        Returns None if widget doesn't exist or is_active=False. Both cases look
+        the same to the caller (404 response) — intentionally does not distinguish
+        "does not exist" from "inactive" to avoid leaking widget existence.
+        """
+        result = await self.session.execute(
+            select(Widget)
+            .where(Widget.id == widget_id, Widget.is_active == True)  # noqa: E712
+            .options(selectinload(Widget.form_fields))
+        )
+        return result.scalar_one_or_none()
+
     async def list_for_customer(self, customer_id: uuid.UUID) -> Sequence[Widget]:
         """List a customer's widgets, newest first, without their fields."""
         result = await self.session.execute(
