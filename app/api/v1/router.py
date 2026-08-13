@@ -16,6 +16,7 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(widgets.router)
 api_router.include_router(config.router)
+api_router.include_router(config.static_router)
 
 # TODO: Include submissions router when implemented
 # api_router.include_router(submissions.router)
