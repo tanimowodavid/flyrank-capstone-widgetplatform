@@ -30,6 +30,8 @@ from app.core.rate_limit import limiter
 from app.db import get_db
 from app.db.base import Base
 from app.main import app
+from app.models.customer import Customer
+from app.models.widget import Widget
 
 TEST_DB_NAME = settings.TEST_DATABASE_NAME
 
@@ -196,3 +198,68 @@ async def db_session(
     """Direct database session for repository-level tests."""
     async with session_factory() as session:
         yield session
+
+
+@pytest.fixture
+async def db(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncGenerator[AsyncSession, None]:
+    """Alias for db_session, used by some tests."""
+    async with session_factory() as session:
+        yield session
+
+
+@pytest.fixture
+async def active_widget(
+    db_session: AsyncSession,
+) -> AsyncGenerator[Widget, None]:
+    """Create an active widget with a customer for testing."""
+    customer = Customer(
+        organization_name="Test Org",
+        email="owner@example.com",
+        password_hash="not-a-real-hash",
+    )
+    db_session.add(customer)
+    await db_session.flush()
+
+    widget = Widget(
+        customer_id=customer.id,
+        widget_type="signup_form",
+        title="Test Widget",
+        description="Test widget description",
+        button_text="Submit",
+        theme_color="#0066cc",
+        is_active=True,
+    )
+    db_session.add(widget)
+    await db_session.commit()
+
+    yield widget
+
+
+@pytest.fixture
+async def inactive_widget(
+    db_session: AsyncSession,
+) -> AsyncGenerator[Widget, None]:
+    """Create an inactive widget with a customer for testing."""
+    customer = Customer(
+        organization_name="Test Org",
+        email="owner@example.com",
+        password_hash="not-a-real-hash",
+    )
+    db_session.add(customer)
+    await db_session.flush()
+
+    widget = Widget(
+        customer_id=customer.id,
+        widget_type="signup_form",
+        title="Inactive Widget",
+        description="Inactive widget description",
+        button_text="Submit",
+        theme_color="#0066cc",
+        is_active=False,
+    )
+    db_session.add(widget)
+    await db_session.commit()
+
+    yield widget

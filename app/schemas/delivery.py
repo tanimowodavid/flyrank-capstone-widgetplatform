@@ -47,3 +47,35 @@ class WidgetConfig(BaseModel):
     # Ordered by FormField.display_order, applied by the relationship itself so
     # every load path shares it rather than just one query.
     form_fields: list[FormFieldConfig]
+
+
+class SubmissionCreate(BaseModel):
+    """Anonymous submission from an embedded form.
+
+    The embed script collects form values keyed by field_name, and posts them
+    directly with no server-side processing. The backend enriches this with
+    geolocation, spam filtering, and timestamps.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    # Form field values, keyed by field_name from the form definition
+    # e.g. {"email": "user@example.com", "name": "John"}
+    field_values: dict[str, str | None]
+    # Optional referrer URL (captures where the submission came from)
+    referrer: str | None = None
+    # Optional user agent (useful for spam analysis)
+    user_agent: str | None = None
+
+
+class SubmissionResponse(BaseModel):
+    """Response after successful submission."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    # Submission ID for tracking/reference
+    id: str
+    # Timestamp of submission
+    created_at: str
+    # Message for the end user
+    message: str

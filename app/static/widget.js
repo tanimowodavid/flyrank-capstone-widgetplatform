@@ -217,37 +217,58 @@
 
   /**
    * Collect form data and post to the submission endpoint.
-   * TODO: wire to POST /api/v1/widgets/{id}/submit once built
    */
   function submitForm(form, widgetId, baseUrl) {
     var formData = new FormData(form);
-    var payload = {};
+    var fieldValues = {};
 
     formData.forEach(function (value, key) {
-      payload[key] = value;
+      fieldValues[key] = value;
     });
 
-    console.log("[FlyRank Widget] Submission payload:", payload);
+    var payload = {
+      field_values: fieldValues,
+      referrer: typeof document !== "undefined" ? document.referrer : null,
+      user_agent: navigator.userAgent,
+    };
 
-    // TODO: Once submission endpoint is built, uncomment:
-    // fetch(baseUrl + '/api/v1/widgets/' + widgetId + '/submit', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify(payload),
-    //   credentials: 'omit',
-    //   mode: 'cors',
-    // })
-    // .then(function (response) {
-    //   if (!response.ok) {
-    //     console.error('[FlyRank Widget] Submission failed:', response.status);
-    //     return;
-    //   }
-    //   console.log('[FlyRank Widget] Submission successful');
-    //   form.reset();
-    // })
-    // .catch(function (error) {
-    //   console.error('[FlyRank Widget] Submission error:', error.message);
-    // });
+    fetch(baseUrl + "/api/v1/widgets/" + widgetId + "/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      credentials: "omit",
+      mode: "cors",
+    })
+      .then(function (response) {
+        if (!response.ok) {
+          console.warn(
+            "[FlyRank Widget] Submission failed with status " + response.status,
+          );
+          return;
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        if (data) {
+          console.log("[FlyRank Widget] Submission successful, ID:", data.id);
+          form.reset();
+          // Optionally show success message to user
+          var successMsg = document.createElement("div");
+          successMsg.textContent = data.message || "Thank you for your submission";
+          successMsg.style.color = "green";
+          successMsg.style.marginTop = "10px";
+          successMsg.style.fontSize = "14px";
+          form.parentNode.insertBefore(successMsg, form.nextSibling);
+          setTimeout(function () {
+            successMsg.remove();
+          }, 3000);
+        }
+      })
+      .catch(function (error) {
+        console.warn(
+          "[FlyRank Widget] Submission error: " + error.message,
+        );
+      });
 
     // For now, just log success
     alert("Form submitted! (Submission endpoint not yet implemented)");
