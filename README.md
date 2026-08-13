@@ -171,6 +171,80 @@ docker compose exec app alembic downgrade -1
 
 Autogenerate only sees models that have been imported. Every new model module must be imported in [app/models/\_\_init\_\_.py](app/models/__init__.py) — otherwise Alembic treats its table as nonexistent and will generate a migration that drops it.
 
+## Testing the embeddable widget locally
+
+To verify the widget loads and renders correctly on a different origin (required for CORS testing):
+
+**1. Start the API server**
+```bash
+docker compose up -d
+```
+
+**2. Create a widget via the API**
+```bash
+# Sign up and get a token
+curl -X POST http://localhost:8000/api/v1/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@example.com",
+    "password": "TestPassword123!",
+    "organization_name": "Test Org"
+  }'
+
+# Create a widget
+curl -X POST http://localhost:8000/api/v1/widgets \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "widget_type": "signup_form",
+    "title": "Newsletter Signup",
+    "description": "Join our mailing list",
+    "button_text": "Subscribe",
+    "theme_color": "#0066cc",
+    "form_fields": [
+      {
+        "field_name": "email",
+        "label": "Email Address",
+        "field_type": "email",
+        "is_required": true
+      }
+    ]
+  }'
+```
+
+Copy the `embed_snippet` from the response (e.g., `<script src="http://localhost:8000/widget.js?id=YOUR_WIDGET_ID"></script>`).
+
+**3. Serve the test page on a different port**
+
+Open a new terminal and run:
+```bash
+cd test-page/
+python -m http.server 5500
+```
+
+This serves the test page on http://localhost:5500 (different origin than the API on http://localhost:8000).
+
+**4. Edit the test page**
+
+Edit [test-page/customer-site.html](test-page/customer-site.html) and replace:
+```html
+<!-- <script src="http://localhost:8000/widget.js?id=REPLACE_WITH_REAL_WIDGET_ID"></script> -->
+```
+
+with your actual embed snippet:
+```html
+<script src="http://localhost:8000/widget.js?id=YOUR_WIDGET_ID"></script>
+```
+
+**5. Verify**
+
+Open http://localhost:5500 in your browser. You should see:
+- The test page loads with the customer website content
+- The widget appears on the right side (different origin, so CORS headers are tested)
+- The widget renders with the title, description, form fields, and button from your config
+- The button color matches the `theme_color` you configured (or defaults to skyblue if invalid)
+- Console should show no CORS errors
+
 ## Common commands
 
 ```bash

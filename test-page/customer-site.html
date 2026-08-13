@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customer Website - Widget Embed Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f9f9f9;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.95;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            align-items: start;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .main-content h2 {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+
+        .main-content p {
+            margin-bottom: 15px;
+            color: #666;
+            line-height: 1.8;
+        }
+
+        .widget-section {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .widget-section h3 {
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            color: #764ba2;
+            display: flex;
+            align-items: center;
+        }
+
+        .widget-section .icon {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            background-color: #667eea;
+            border-radius: 50%;
+            margin-right: 10px;
+            flex-shrink: 0;
+        }
+
+        .code-block {
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+            color: #d73a49;
+            margin-bottom: 15px;
+        }
+
+        .note {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-size: 0.95rem;
+        }
+
+        .note strong {
+            color: #856404;
+        }
+
+        .benefits {
+            list-style: none;
+            margin-top: 20px;
+        }
+
+        .benefits li {
+            padding: 10px 0;
+            padding-left: 30px;
+            position: relative;
+            color: #666;
+        }
+
+        .benefits li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #667eea;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .embed-placeholder {
+            background: #f0f0f0;
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            border-radius: 4px;
+            color: #999;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        footer {
+            background-color: #f0f0f0;
+            border-top: 1px solid #ddd;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🚀 FlyRank Widget Test Page</h1>
+        <p>A sample customer website demonstrating the embeddable widget</p>
+    </header>
+
+    <div class="container">
+        <div class="content">
+            <!-- Main Content -->
+            <div class="main-content">
+                <h2>Welcome to Our Platform</h2>
+
+                <p>
+                    This is a sample landing page for testing the FlyRank embeddable widget. 
+                    In a real-world scenario, this would be your company's marketing website, 
+                    blog, or product page.
+                </p>
+
+                <p>
+                    The widget on the right side demonstrates how easily you can embed a lead 
+                    capture form onto any website—no server-side integration required, just a 
+                    single line of HTML.
+                </p>
+
+                <h3 style="margin-top: 30px; margin-bottom: 15px;">Benefits of Our Service</h3>
+                <ul class="benefits">
+                    <li>Simple one-line embed snippet</li>
+                    <li>Works on any website without backend changes</li>
+                    <li>Automatic spam detection</li>
+                    <li>Enriched with geolocation data</li>
+                    <li>Reliable submission capture</li>
+                    <li>Beautiful, responsive design</li>
+                </ul>
+
+                <p style="margin-top: 30px; font-style: italic; color: #999;">
+                    This test page is intentionally simple so you can focus on verifying 
+                    that the widget loads and renders correctly from a different origin.
+                </p>
+            </div>
+
+            <!-- Widget Placeholder -->
+            <div class="widget-section">
+                <h3>
+                    <span class="icon"></span>
+                    Newsletter Signup
+                </h3>
+
+                <div class="note">
+                    <strong>📝 Setup Instructions:</strong><br>
+                    Replace the placeholder below with your real widget embed snippet. 
+                    To get your widget ID, create a widget in the dashboard and copy 
+                    the embed snippet shown there.
+                </div>
+
+                <!-- ============================================================ -->
+                <!-- Paste your real widget embed snippet below, replacing this   -->
+                <!-- ============================================================ -->
+                
+                <!-- Example: -->
+                <!-- <script src="http://localhost:8000/widget.js?id=YOUR_WIDGET_ID_HERE"></script> -->
+                
+                <!-- For testing, you can manually replace YOUR_WIDGET_ID_HERE with -->
+                <!-- an actual widget ID from the API. -->
+                
+                <div class="embed-placeholder">
+                    <div>
+                        <p>🔧 Widget will appear here</p>
+                        <p style="font-size: 0.9rem; color: #999; margin-top: 10px;">
+                            Paste your embed snippet above this placeholder
+                        </p>
+                    </div>
+                </div>
+
+                <div class="code-block">
+&lt;script src="http://localhost:8000/widget.js?id=REPLACE_WITH_REAL_WIDGET_ID"&gt;&lt;/script&gt;
+                </div>
+
+                <!-- ============================================================ -->
+                <!-- End of placeholder section                                   -->
+                <!-- ============================================================ -->
+
+                <div class="note">
+                    <strong>💡 How to Test:</strong><br>
+                    1. Start the API server: <code>docker compose up</code><br>
+                    2. Create a widget via the API dashboard<br>
+                    3. Copy the embed snippet from the widget details<br>
+                    4. Replace the placeholder above with the real snippet<br>
+                    5. Refresh this page to see the widget load and render
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>
+            🌐 This page is served from a different origin (port) than the API.<br>
+            This enables real CORS testing of the embeddable widget.
+        </p>
+    </footer>
+</body>
+</html>
