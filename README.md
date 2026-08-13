@@ -10,19 +10,19 @@ The engineering goal is resilience: a submission is never lost because a third-p
 
 ### Tech stack
 
-| Layer         | Choice                                |
-| ------------- | ------------------------------------- |
-| Language      | Python 3.12                           |
-| Web framework | FastAPI                               |
-| Database      | PostgreSQL 16                         |
-| ORM           | SQLAlchemy 2.0 (async) with `asyncpg` |
-| Migrations    | Alembic (async template)              |
-| Cache / limits| Redis 7 (`slowapi` + `limits`)        |
-| Auth          | JWT (`PyJWT`) + bcrypt via `passlib`  |
-| Config        | Pydantic `BaseSettings`               |
-| Packaging     | uv                                    |
-| Runtime       | Docker Compose                        |
-| Tests         | pytest + pytest-asyncio               |
+| Layer          | Choice                                |
+| -------------- | ------------------------------------- |
+| Language       | Python 3.12                           |
+| Web framework  | FastAPI                               |
+| Database       | PostgreSQL 16                         |
+| ORM            | SQLAlchemy 2.0 (async) with `asyncpg` |
+| Migrations     | Alembic (async template)              |
+| Cache / limits | Redis 7 (`slowapi` + `limits`)        |
+| Auth           | JWT (`PyJWT`) + bcrypt via `passlib`  |
+| Config         | Pydantic `BaseSettings`               |
+| Packaging      | uv                                    |
+| Runtime        | Docker Compose                        |
+| Tests          | pytest + pytest-asyncio               |
 
 ## Prerequisites
 
@@ -75,30 +75,30 @@ Source is bind-mounted into the container and uvicorn runs with `--reload`, so e
 
 ## Environment variables
 
-| Variable            | Default                   | Notes                                                                                  |
-| ------------------- | ------------------------- | -------------------------------------------------------------------------------------- |
-| `PROJECT_NAME`      | `FlyRank Widget Platform` | Shown in the OpenAPI docs                                                              |
-| `DEBUG`             | `false`                   |                                                                                        |
-| `POSTGRES_USER`     | —                         | **Required**                                                                           |
-| `POSTGRES_PASSWORD` | —                         | **Required**                                                                           |
-| `POSTGRES_DB`       | —                         | **Required**                                                                           |
-| `POSTGRES_HOST`     | `db`                      | `localhost` in `.env` for host-side runs; Compose overrides to `db` inside the network |
-| `POSTGRES_PORT`     | `5432`                    | `5433` on the host to avoid clashing with a local Postgres                             |
-| `DB_POOL_SIZE`      | `10`                      |                                                                                        |
-| `DB_MAX_OVERFLOW`   | `5`                       | Extra connections allowed past the pool size                                           |
-| `DB_POOL_TIMEOUT`   | `30`                      | Seconds to wait for a free connection                                                  |
-| `DB_POOL_RECYCLE`   | `1800`                    | Recycle connections older than this, in seconds                                        |
-| `DB_ECHO`           | `false`                   | Log every SQL statement                                                                |
-| `SECRET_KEY`        | —                         | **Required** — signs JWTs. Rotating it invalidates every issued token                  |
-| `JWT_ALGORITHM`     | `HS256`                   |                                                                                        |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `60`            |                                                                                        |
-| `REDIS_HOST`        | `redis`                   | `localhost` in `.env` for host-side runs; Compose overrides to `redis`                 |
-| `REDIS_PORT`        | `6379`                    | `6380` on the host to avoid clashing with a local Redis                                |
-| `REDIS_PASSWORD`    | —                         | Optional; unset for local Docker                                                       |
-| `REDIS_DB`          | `0`                       | Database used for rate limit counters                                                  |
-| `REDIS_TEST_DB`     | `15`                      | Flushed by the test suite — must differ from `REDIS_DB`                                |
-| `RATE_LIMIT_LOGIN`  | `5/minute`                | Any `limits` format, e.g. `100/hour`                                                   |
-| `RATE_LIMIT_ENABLED`| `true`                    | Set `false` to disable limiting globally                                               |
+| Variable                      | Default                   | Notes                                                                                  |
+| ----------------------------- | ------------------------- | -------------------------------------------------------------------------------------- |
+| `PROJECT_NAME`                | `FlyRank Widget Platform` | Shown in the OpenAPI docs                                                              |
+| `DEBUG`                       | `false`                   |                                                                                        |
+| `POSTGRES_USER`               | —                         | **Required**                                                                           |
+| `POSTGRES_PASSWORD`           | —                         | **Required**                                                                           |
+| `POSTGRES_DB`                 | —                         | **Required**                                                                           |
+| `POSTGRES_HOST`               | `db`                      | `localhost` in `.env` for host-side runs; Compose overrides to `db` inside the network |
+| `POSTGRES_PORT`               | `5432`                    | `5433` on the host to avoid clashing with a local Postgres                             |
+| `DB_POOL_SIZE`                | `10`                      |                                                                                        |
+| `DB_MAX_OVERFLOW`             | `5`                       | Extra connections allowed past the pool size                                           |
+| `DB_POOL_TIMEOUT`             | `30`                      | Seconds to wait for a free connection                                                  |
+| `DB_POOL_RECYCLE`             | `1800`                    | Recycle connections older than this, in seconds                                        |
+| `DB_ECHO`                     | `false`                   | Log every SQL statement                                                                |
+| `SECRET_KEY`                  | —                         | **Required** — signs JWTs. Rotating it invalidates every issued token                  |
+| `JWT_ALGORITHM`               | `HS256`                   |                                                                                        |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `60`                      |                                                                                        |
+| `REDIS_HOST`                  | `redis`                   | `localhost` in `.env` for host-side runs; Compose overrides to `redis`                 |
+| `REDIS_PORT`                  | `6379`                    | `6380` on the host to avoid clashing with a local Redis                                |
+| `REDIS_PASSWORD`              | —                         | Optional; unset for local Docker                                                       |
+| `REDIS_DB`                    | `0`                       | Database used for rate limit counters                                                  |
+| `REDIS_TEST_DB`               | `15`                      | Flushed by the test suite — must differ from `REDIS_DB`                                |
+| `RATE_LIMIT_LOGIN`            | `5/minute`                | Any `limits` format, e.g. `100/hour`                                                   |
+| `RATE_LIMIT_ENABLED`          | `true`                    | Set `false` to disable limiting globally                                               |
 
 Postgres is published on host port **5433**, not 5432. Connect with `psql -h localhost -p 5433 -U <user> -d <db>`.
 
@@ -110,8 +110,8 @@ Rate limits are enforced by [slowapi](https://github.com/laurentS/slowapi) with 
 
 Redis rather than in-memory storage is a correctness requirement, not an optimisation: counters must be shared across worker processes. In-memory storage would give each uvicorn worker its own counter, silently turning `5/minute` into `5/minute per worker`.
 
-| Endpoint           | Limit                     | Key       |
-| ------------------ | ------------------------- | --------- |
+| Endpoint           | Limit                      | Key       |
+| ------------------ | -------------------------- | --------- |
 | `POST /auth/login` | `RATE_LIMIT_LOGIN` (5/min) | Client IP |
 
 Exceeding a limit returns `429` with a `Retry-After` header (seconds until the window resets) and a `{"detail": ...}` body matching every other API error. Successful responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` so a client can back off before being rejected.
@@ -176,11 +176,13 @@ Autogenerate only sees models that have been imported. Every new model module mu
 To verify the widget loads and renders correctly on a different origin (required for CORS testing):
 
 **1. Start the API server**
+
 ```bash
 docker compose up -d
 ```
 
 **2. Create a widget via the API**
+
 ```bash
 # Sign up and get a token
 curl -X POST http://localhost:8000/api/v1/auth/signup \
@@ -217,6 +219,7 @@ Copy the `embed_snippet` from the response (e.g., `<script src="http://localhost
 **3. Serve the test page on a different port**
 
 Open a new terminal and run:
+
 ```bash
 cd test-page/
 python -m http.server 5500
@@ -227,11 +230,13 @@ This serves the test page on http://localhost:5500 (different origin than the AP
 **4. Edit the test page**
 
 Edit [test-page/customer-site.html](test-page/customer-site.html) and replace:
+
 ```html
 <!-- <script src="http://localhost:8000/widget.js?id=REPLACE_WITH_REAL_WIDGET_ID"></script> -->
 ```
 
 with your actual embed snippet:
+
 ```html
 <script src="http://localhost:8000/widget.js?id=YOUR_WIDGET_ID"></script>
 ```
@@ -239,6 +244,7 @@ with your actual embed snippet:
 **5. Verify**
 
 Open http://localhost:5500 in your browser. You should see:
+
 - The test page loads with the customer website content
 - The widget appears on the right side (different origin, so CORS headers are tested)
 - The widget renders with the title, description, form fields, and button from your config
