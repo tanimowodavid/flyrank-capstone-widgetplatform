@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     # Base URL the embed snippet points at. Its own setting rather than something
     # derived from the incoming request: widget.js is a static asset that may well
     # be served from a CDN, so the loader's host is not necessarily the API's.
-    WIDGET_EMBED_BASE_URL: str = "https://your-domain.com"
+    WIDGET_EMBED_BASE_URL: str = "http://localhost:8000/api/v1"
 
     @field_validator("WIDGET_EMBED_BASE_URL")
     @classmethod

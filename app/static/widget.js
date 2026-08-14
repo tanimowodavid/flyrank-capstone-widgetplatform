@@ -3,67 +3,72 @@
  *
  * Vanilla JavaScript, no dependencies, runs on any page.
  *
- * Usage: <script src="http://localhost:8000/widget.js?id=WIDGET_ID"></script>
- *
- * This script:
- * 1. Extracts its own widget ID from the query parameter
- * 2. Fetches the widget config from the public endpoint
- * 3. Renders a form at the location of this script tag
- * 4. Posts submissions to the backend
+ * Usage: <script src="http://localhost:8000/api/v1/widget.js?id=WIDGET_ID"></script>
  */
 
 (function () {
   "use strict";
 
-  /**
-   * Get this script's widget ID from the src query parameter.
-   * Returns null if not found or if document.currentScript is unavailable.
-   */
-  function getWidgetIdFromScript() {
-    var script = document.currentScript;
-    if (!script) {
-      console.warn(
-        "[FlyRank Widget] Unable to locate script tag (document.currentScript not available)",
-      );
-      return null;
-    }
+  // 1. CAPTURE SCRIPT TAG IMMEDIATELY AT EVALUATION TIME
+  // (Must happen synchronously before any async functions or DOMContentLoaded listeners)
+  var currentScript = document.currentScript;
 
-    var src = script.src;
-    var match = src.match(/[?&]id=([^&]+)/);
-    if (!match) {
-      console.warn("[FlyRank Widget] No widget ID in script src");
-      return null;
-    }
-
-    return match[1];
+  if (!currentScript) {
+    // Fallback if currentScript is unsupported: query the last script tag on page
+    var scripts = document.getElementsByTagName("script");
+    currentScript = scripts[scripts.length - 1];
   }
 
   /**
-   * Validate a CSS color value. Returns true if valid, false otherwise.
-   * Handles hex colors, named colors, rgb/rgba, etc.
+   * Get this script's widget ID from the src query parameter.
+   */
+  function getWidgetIdFromScript(script) {
+    if (!script || !script.src) {
+      console.warn("[FlyRank Widget] Unable to locate script tag");
+      return null;
+    }
+
+    try {
+      var url = new URL(script.src);
+      return url.searchParams.get("id");
+    } catch (e) {
+      // Fallback regex if URL parsing fails
+      var match = script.src.match(/[?&]id=([^&]+)/);
+      return match ? match[1] : null;
+    }
+  }
+
+  /**
+   * Get the base API URL directly from the script tag's origin (e.g., http://localhost:8000).
+   */
+  function getBaseUrl(script) {
+    if (script && script.src) {
+      try {
+        var url = new URL(script.src);
+        return url.origin; // Returns "http://localhost:8000"
+      } catch (e) {
+        // Fallback
+      }
+    }
+    return "http://localhost:8000";
+  }
+
+  /**
+   * Validate a CSS color value.
    */
   function isValidCssColor(color) {
     if (!color || typeof color !== "string") return false;
-
-    // Create a temporary element to test the color
     var div = document.createElement("div");
     div.style.color = color;
-
-    // If the color was set, it will be a valid CSS color
-    // (except for '' and 'inherit', etc. which we filter separately)
     return div.style.color !== "";
   }
 
-  /**
-   * Get a valid CSS color, defaulting to skyblue if the provided color is invalid.
-   */
   function getValidColor(color) {
-    return isValidCssColor(color) ? color : "skyblue";
+    return isValidCssColor(color) ? color : "#0284c7";
   }
 
   /**
    * Fetch widget config from the public endpoint.
-   * Returns the config object on success, null on failure (silently).
    */
   async function fetchWidgetConfig(widgetId, baseUrl) {
     try {
@@ -71,7 +76,7 @@
         baseUrl + "/api/v1/widgets/" + widgetId + "/config",
         {
           method: "GET",
-          credentials: "omit", // Don't send cookies (public endpoint)
+          credentials: "omit",
           mode: "cors",
         },
       );
@@ -91,15 +96,6 @@
   }
 
   /**
-   * Get the base URL for API calls (protocol + host, no trailing slash).
-   * If needed, could be configured via data attribute or global variable.
-   */
-  function getBaseUrl() {
-    // For now, use the current page's protocol and host
-    return window.location.protocol + "//" + window.location.host;
-  }
-
-  /**
    * Create a form input based on field_type.
    */
   function createFormInput(field) {
@@ -116,7 +112,7 @@
     var input;
     if (field.field_type === "textarea") {
       input = document.createElement("textarea");
-      input.style.height = "120px";
+      input.style.height = "100px";
     } else if (field.field_type === "email") {
       input = document.createElement("input");
       input.type = "email";
@@ -124,7 +120,6 @@
       input = document.createElement("input");
       input.type = "number";
     } else {
-      // Default to text
       input = document.createElement("input");
       input.type = "text";
     }
@@ -150,7 +145,6 @@
   function renderForm(container, config, widgetId, baseUrl) {
     container.innerHTML = "";
 
-    // Title
     if (config.title) {
       var title = document.createElement("h3");
       title.textContent = config.title;
@@ -160,7 +154,6 @@
       container.appendChild(title);
     }
 
-    // Description
     if (config.description) {
       var desc = document.createElement("p");
       desc.textContent = config.description;
@@ -170,19 +163,16 @@
       container.appendChild(desc);
     }
 
-    // Form
     var form = document.createElement("form");
     form.style.display = "flex";
     form.style.flexDirection = "column";
 
-    // Render form fields
     if (config.form_fields && Array.isArray(config.form_fields)) {
       config.form_fields.forEach(function (field) {
         form.appendChild(createFormInput(field));
       });
     }
 
-    // Submit button
     var buttonColor = getValidColor(config.theme_color);
     var button = document.createElement("button");
     button.type = "submit";
@@ -196,17 +186,9 @@
     button.style.fontSize = "16px";
     button.style.fontWeight = "bold";
     button.style.cursor = "pointer";
-    button.style.transition = "opacity 0.2s";
-    button.onmouseover = function () {
-      this.style.opacity = "0.9";
-    };
-    button.onmouseout = function () {
-      this.style.opacity = "1";
-    };
 
     form.appendChild(button);
 
-    // Form submission handler
     form.onsubmit = function (e) {
       e.preventDefault();
       submitForm(form, widgetId, baseUrl);
@@ -216,7 +198,7 @@
   }
 
   /**
-   * Collect form data and post to the submission endpoint.
+   * Post submission payload to backend.
    */
   function submitForm(form, widgetId, baseUrl) {
     var formData = new FormData(form);
@@ -250,11 +232,10 @@
       })
       .then(function (data) {
         if (data) {
-          console.log("[FlyRank Widget] Submission successful, ID:", data.id);
           form.reset();
-          // Optionally show success message to user
           var successMsg = document.createElement("div");
-          successMsg.textContent = data.message || "Thank you for your submission";
+          successMsg.textContent =
+            data.message || "Thank you for your submission";
           successMsg.style.color = "green";
           successMsg.style.marginTop = "10px";
           successMsg.style.fontSize = "14px";
@@ -265,55 +246,52 @@
         }
       })
       .catch(function (error) {
-        console.warn(
-          "[FlyRank Widget] Submission error: " + error.message,
-        );
+        console.warn("[FlyRank Widget] Submission error: " + error.message);
       });
-
-    // For now, just log success
-    alert("Form submitted! (Submission endpoint not yet implemented)");
-    form.reset();
   }
 
   /**
-   * Main initialization: load config and render.
+   * Main initialization.
    */
   async function init() {
-    var widgetId = getWidgetIdFromScript();
+    var targetScript = currentScript;
+    var widgetId = getWidgetIdFromScript(targetScript);
+
     if (!widgetId) {
       console.error("[FlyRank Widget] Cannot initialize without widget ID");
       return;
     }
 
-    var baseUrl = getBaseUrl();
+    var baseUrl = getBaseUrl(targetScript);
     var config = await fetchWidgetConfig(widgetId, baseUrl);
+
     if (!config) {
       console.error("[FlyRank Widget] Failed to load widget config");
       return;
     }
 
-    // Create container and insert after script tag
-    var script = document.currentScript;
     var container = document.createElement("div");
     container.id = "flyrank-widget-" + widgetId;
     container.style.fontFamily = "sans-serif";
     container.style.maxWidth = "500px";
-    container.style.margin = "0";
+    container.style.margin = "20px 0";
     container.style.padding = "20px";
     container.style.border = "1px solid #eee";
     container.style.borderRadius = "6px";
     container.style.backgroundColor = "#fafafa";
     container.style.boxSizing = "border-box";
 
-    // Insert after the script tag
-    if (script.parentNode) {
-      script.parentNode.insertBefore(container, script.nextSibling);
+    // Safely insert container after script tag
+    if (targetScript && targetScript.parentNode) {
+      targetScript.parentNode.insertBefore(container, targetScript.nextSibling);
+    } else {
+      document.body.appendChild(container);
     }
 
     renderForm(container, config, widgetId, baseUrl);
   }
 
-  // Run init when DOM is ready
+  // Run initialization
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {
