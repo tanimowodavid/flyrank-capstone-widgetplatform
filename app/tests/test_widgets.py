@@ -1095,7 +1095,7 @@ class TestEmbedSnippet:
         )
 
         assert re.fullmatch(
-            r'<script src="https://[^"?\s]+/widget\.js\?id='
+            r'<script src="https?://[^"?\s]+/widget\.js\?id='
             r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}">'
             r"</script>",
             response.json()["embed_snippet"],

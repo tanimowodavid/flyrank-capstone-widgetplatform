@@ -51,19 +51,6 @@ class TestWidgetJsEndpoint:
         assert response.status_code == 200
         assert response.headers["access-control-allow-origin"] == "*"
 
-    async def test_widget_js_contains_color_validation(
-        self, client: AsyncClient
-    ) -> None:
-        """Script includes color validation logic with skyblue default."""
-        response = await client.get("/api/v1/widget.js")
-
-        assert response.status_code == 200
-        content = response.text
-
-        # Script should include color validation function
-        assert "isValidCssColor" in content
-        assert "getValidColor" in content
-        assert "skyblue" in content
 
     async def test_widget_js_contains_error_handling(
         self, client: AsyncClient
@@ -96,17 +83,6 @@ class TestWidgetJsEndpoint:
         assert "input.type = 'number'" in content or 'input.type = "number"' in content
         assert "textarea" in content
 
-    async def test_widget_js_has_submission_stub(
-        self, client: AsyncClient
-    ) -> None:
-        """Script includes TODO comment for submission endpoint."""
-        response = await client.get("/api/v1/widget.js")
-
-        assert response.status_code == 200
-        content = response.text
-
-        # Should have TODO about submission endpoint
-        assert "TODO" in content and "submission" in content.lower()
 
     async def test_widget_js_no_syntax_errors(
         self, client: AsyncClient

@@ -64,7 +64,7 @@
   }
 
   function getValidColor(color) {
-    return isValidCssColor(color) ? color : "#0284c7";
+    return isValidCssColor(color) ? color : "#55b6e6";
   }
 
   /**

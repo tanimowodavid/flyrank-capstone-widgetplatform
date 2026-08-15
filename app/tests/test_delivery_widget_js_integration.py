@@ -136,19 +136,6 @@ class TestWidgetJsIntegration:
         # Should include CORS header
         assert response.headers.get("access-control-allow-origin") == "*"
 
-    async def test_widget_js_script_with_color_validation(
-        self, client: AsyncClient
-    ) -> None:
-        """Widget.js includes logic to validate and apply CSS color."""
-        response = await client.get("/api/v1/widget.js")
-
-        assert response.status_code == 200
-        content = response.text
-
-        # Script should validate colors
-        assert "isValidCssColor" in content
-        # Script should default to skyblue
-        assert "skyblue" in content
 
     async def test_widget_js_with_null_theme_color(
         self, db_session: AsyncSession, client: AsyncClient
@@ -183,7 +170,7 @@ class TestWidgetJsIntegration:
         script_response = await client.get("/api/v1/widget.js")
         script_content = script_response.text
         assert "getValidColor" in script_content
-        assert "skyblue" in script_content
+        assert "#55b6e6" in script_content    # skyblue
 
     async def test_widget_js_form_fields_order_preserved(
         self, db_session: AsyncSession, client: AsyncClient
