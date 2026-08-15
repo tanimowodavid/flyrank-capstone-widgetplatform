@@ -15,6 +15,22 @@ from app.schemas.delivery import SubmissionCreate, SubmissionResponse
 router = APIRouter(prefix="/widgets", tags=["submission"])
 
 
+
+@router.options("/{widget_id}/submit", include_in_schema=False)
+async def options_submit_widget_response() -> JSONResponse:
+    """Handle CORS preflight OPTIONS request from third-party sites."""
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"status": "ok"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Max-Age": "86400",
+        },
+    )
+
+
 @router.post(
     "/{widget_id}/submit",
     response_model=SubmissionResponse,
@@ -46,8 +62,8 @@ async def submit_widget_response(
       3. Stores the submission with best-effort enrichment data
       4. Returns a success response with submission ID
 
-    Note: Spam detection (Stage 5) runs asynchronously after submission.
-    Geolocation enrichment (Stage 6) is best-effort; submission is stored
+    Note: Spam detection runs asynchronously after submission.
+    Geolocation enrichment is best-effort; submission is stored
     even if enrichment fails.
     """
     # Get the widget and verify it's active
@@ -77,11 +93,9 @@ async def submit_widget_response(
         payload=submission.field_values,
         submitter_ip=submitter_ip,
         user_agent=user_agent or submission.user_agent,
-        # Geolocation enrichment will be added in Stage 6
         geo_country=None,
         geo_city=None,
         geo_provider=None,
-        # Spam detection will be added in Stage 5
         is_spam=False,
     )
 
