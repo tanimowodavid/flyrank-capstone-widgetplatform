@@ -1,30 +1,108 @@
-"""Submission business logic (PRD Path C - accept, validate, enrich, persist, notify).
+"""Submission business rules: accept, flag, enrich, persist (PRD Path C).
 
-Orchestrates the full submission pipeline:
-  1. Validate the payload shape against the widget's form_fields (FR3.2)
-  2. Check for spam via honeypot (FR4.2)
-  3. Capture IP and User-Agent from request headers
-  4. Enrich with geolocation using fallback chain (FR5.1-5.2)
-  5. Store the submission atomically (FR3.3)
-  6. Trigger side effect (email/webhook) without blocking success (FR5.3)
+Raises domain errors rather than HTTPException — mapping to status codes belongs
+in the endpoint layer, matching AuthService and WidgetService.
 
-TODO: Implement SubmissionService for:
-  - FR3.2: Validate payload size, field names, required fields, field types
-  - FR4.2: Honeypot detection - check if honeypot_field is filled (mark is_spam=True, silently drop)
-  - FR5.1: Geo enrichment with provider fallback (try Provider A, then Provider B)
-  - FR5.2: If enrichment fails, store submission anyway without geo data
-  - FR5.3: Queue side effects (email/webhook) after commit; if side effect fails, log but don't raise
-  - Raise domain errors, not HTTPException; mapping to status codes belongs in endpoint layer
-  
-Key design decisions:
-  - Like WidgetService: raise custom exceptions, let endpoint map to HTTP status
-  - Submission success never depends on enrichment or side effects
-  - Side effects are fire-and-forget (async task queue or background job recommended)
-  - Honeypot submission is silently dropped (no error to visitor, just is_spam=True)
+The ordering here is the design. A submission is a lead someone's business is
+waiting for, so storing it is the one step allowed to fail the request. Spam
+flagging is a pure decision made before any of it, enrichment is best-effort and
+cannot block, and neither is permitted to turn a valid submission into an error.
 """
+
+import logging
+import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# TODO: Implement SubmissionService class
-class SubmissionNotCreatedError(Exception):
-    """Submission could not be stored."""
+from app.models.submission import Submission
+from app.repositories.submission import SubmissionRepository
+from app.repositories.widget import WidgetRepository
+from app.schemas.delivery import SubmissionCreate
+from app.schemas.submission import SubmissionData
+from app.services.enrichment import EnrichmentService
+
+logger = logging.getLogger(__name__)
+
+
+class WidgetNotAvailableError(Exception):
+    """No widget with this id is accepting submissions.
+
+    Deliberately does not distinguish "never existed" from "deactivated": both
+    must produce the same 404, or the public endpoint becomes a way to enumerate
+    which widget ids exist.
+    """
+
+
+class SubmissionService:
+    def __init__(
+        self, session: AsyncSession, enrichment: EnrichmentService
+    ) -> None:
+        self.session = session
+        self.submissions = SubmissionRepository(session)
+        self.widgets = WidgetRepository(session)
+        # Injected rather than constructed here, so a test can substitute a fake
+        # and the suite never depends on a third-party provider being up.
+        self.enrichment = enrichment
+
+    async def record(
+        self,
+        *,
+        widget_id: uuid.UUID,
+        payload: SubmissionCreate,
+        submitter_ip: str | None,
+        user_agent: str | None,
+    ) -> Submission:
+        """Store one visitor's submission, flagged and enriched as far as possible.
+
+        submitter_ip is the address the server observed, passed in by the endpoint
+        that read it from the connection or proxy header. It is never taken from
+        the request body: a client that could name its own IP could name someone
+        else's, and every geo record after that would be fiction.
+        """
+        widget = await self.widgets.get_by_id_public(widget_id)
+        if widget is None:
+            raise WidgetNotAvailableError(widget_id)
+
+        # Spam determination happens here, in the constructor: from_field_values
+        # takes the honeypot out of the payload and turns it into the is_spam
+        # flag. Flagged, not refused — a spam submission is stored like any other
+        # so nothing bounces back to tell a bot which attempt was caught.
+        data = SubmissionData.from_field_values(
+            widget_id=widget_id,
+            customer_id=widget.customer_id,
+            field_values=payload.field_values,
+            submitter_ip=submitter_ip,
+            user_agent=user_agent,
+        )
+
+        data = await self._enriched(data)
+
+        submission = await self.submissions.create(data)
+        await self.session.commit()
+        return submission
+
+    async def _enriched(self, data: SubmissionData) -> SubmissionData:
+        """Attach geolocation, or return `data` untouched if it cannot be found.
+
+        EnrichmentService already promises not to raise, so this except clause
+        should be unreachable. It is here anyway because the cost of being wrong
+        is asymmetric: an unhandled error from a best-effort lookup would lose a
+        submission that had already been validated and accepted, and no
+        geolocation is worth that. Cheap insurance against a promise made in
+        another file.
+        """
+        try:
+            geo = await self.enrichment.enrich(data.submitter_ip)
+        except Exception:
+            logger.exception("Geo enrichment raised; storing without geo data")
+            return data
+
+        # model_copy rather than assignment: SubmissionData is built once, in one
+        # place, and stays the object that was validated.
+        return data.model_copy(
+            update={
+                "geo_country": geo.country,
+                "geo_city": geo.city,
+                "geo_provider": geo.provider,
+            }
+        )

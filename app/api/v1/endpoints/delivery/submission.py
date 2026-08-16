@@ -6,11 +6,10 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, status
 from fastapi.responses import JSONResponse
 
-from app.core.deps import DbSession
-from app.repositories.submission import SubmissionRepository
-from app.repositories.widget import WidgetRepository
+from app.core.deps import DbSession, HttpClient
 from app.schemas.delivery import SubmissionCreate, SubmissionResponse
-from app.schemas.submission import SubmissionData
+from app.services.enrichment import EnrichmentService
+from app.services.submission import SubmissionService, WidgetNotAvailableError
 
 # Router for submission endpoints
 router = APIRouter(prefix="/widgets", tags=["submission"])
@@ -42,6 +41,7 @@ async def submit_widget_response(
     widget_id: uuid.UUID,
     submission: SubmissionCreate,
     db: DbSession,
+    http_client: HttpClient,
     user_agent: Annotated[str | None, Header()] = None,
     x_forwarded_for: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
@@ -57,11 +57,11 @@ async def submit_widget_response(
       - 404 if widget doesn't exist or is inactive
       - 422 if submission payload is invalid (missing required fields)
 
-    This endpoint:
-      1. Verifies the widget exists and is active
-      2. Retrieves the widget's customer (tenant isolation)
-      3. Stores the submission with best-effort enrichment data
-      4. Returns a success response with submission ID
+    This endpoint reads what only it can see — the forwarded address and the
+    User-Agent header — and hands the rest to SubmissionService, which verifies
+    the widget, flags spam, enriches, and stores. Everything here is HTTP:
+    header extraction, mapping a domain error to 404, and the CORS and
+    cache headers a cross-origin POST needs.
 
     Spam is flagged, not refused. A submission whose honeypot was filled is
     stored with is_spam=True and gets the same 201 and the same message as any
@@ -72,41 +72,28 @@ async def submit_widget_response(
     Geolocation enrichment is best-effort; submission is stored
     even if enrichment fails.
     """
-    # Get the widget and verify it's active
-    widget_repo = WidgetRepository(db)
-    widget = await widget_repo.get_by_id_public(widget_id)
-
-    if widget is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Widget not found or inactive",
-        )
-
-    # Get the customer (widget.customer_id is set, but retrieved via relationship)
-    customer_id = widget.customer_id
-
     # Extract IP address (prefer X-Forwarded-For for proxy scenarios)
     submitter_ip = None
     if x_forwarded_for:
         # X-Forwarded-For can be a comma-separated list; take the first (original client)
         submitter_ip = x_forwarded_for.split(",")[0].strip()
 
-    # Create the submission. from_field_values takes the honeypot out of the
-    # payload and turns it into the is_spam flag, so what the repository stores is
-    # the widget's real fields and nothing else.
-    submission_repo = SubmissionRepository(db)
-    created_submission = await submission_repo.create(
-        SubmissionData.from_field_values(
+    service = SubmissionService(db, EnrichmentService(http_client))
+
+    try:
+        created_submission = await service.record(
             widget_id=widget_id,
-            customer_id=customer_id,
-            field_values=submission.field_values,
+            payload=submission,
             submitter_ip=submitter_ip,
+            # The header wins over the body's copy: a client can claim any
+            # user_agent it likes, but only one of the two was observed.
             user_agent=user_agent or submission.user_agent,
         )
-    )
-
-    # Commit the transaction
-    await db.commit()
+    except WidgetNotAvailableError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Widget not found or inactive",
+        ) from None
 
     # Return success response
     response_data = {

@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 
 from app.api.v1.router import api_router
@@ -10,7 +11,12 @@ from app.db import engine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
+    # One client for the process, not one per request. Geo lookups are outbound
+    # HTTPS, and a fresh client per submission would mean a fresh TLS handshake
+    # per submission while the pooled connection it could have reused sits idle.
+    async with httpx.AsyncClient() as http_client:
+        app.state.http_client = http_client
+        yield
     # Release pooled connections on shutdown. Reload mode restarts the process
     # frequently, and each restart would otherwise abandon an open pool.
     await engine.dispose()

@@ -3,7 +3,8 @@
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+import httpx
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,19 @@ from app.models.customer import Customer
 from app.repositories.customer import CustomerRepository
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def get_http_client(request: Request) -> httpx.AsyncClient:
+    """The process-wide client opened by the lifespan handler.
+
+    Handed out rather than constructed per request so outbound calls reuse pooled
+    connections. Tests get the same object, which is what makes overriding this
+    dependency enough to keep the suite off the network.
+    """
+    return request.app.state.http_client
+
+
+HttpClient = Annotated[httpx.AsyncClient, Depends(get_http_client)]
 
 # auto_error=False so a missing header reaches us as None and gets the same 401
 # (with WWW-Authenticate) as a bad token, rather than HTTPBearer's bare 403.

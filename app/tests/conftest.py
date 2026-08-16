@@ -9,6 +9,7 @@ run outright if the test database name ever resolves to the development one.
 import asyncio
 from collections.abc import AsyncGenerator, Generator
 
+import httpx
 import pytest
 import redis
 from alembic import command
@@ -26,6 +27,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
+from app.core.deps import get_http_client
 from app.core.rate_limit import limiter
 from app.db import get_db
 from app.db.base import Base
@@ -139,6 +141,41 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+class OfflineHttpClient:
+    """Stands in for httpx.AsyncClient and refuses to make any request.
+
+    Failing loudly-then-gracefully is the point: geo enrichment treats a
+    transport error as "provider unreachable" and falls through to None, so a
+    test that reaches the network by accident still passes — it just proves the
+    degraded path instead of silently depending on ip-api.com being up.
+    """
+
+    def __init__(self) -> None:
+        self.attempted_urls: list[str] = []
+
+    async def get(self, url: str, **kwargs: object) -> httpx.Response:
+        self.attempted_urls.append(url)
+        raise httpx.ConnectError(f"network access is disabled in tests: {url}")
+
+
+@pytest.fixture(autouse=True)
+def offline_http_client() -> Generator[OfflineHttpClient, None, None]:
+    """Keep the whole suite off the network.
+
+    Autouse rather than opt-in: the submission endpoint reaches a geo provider
+    whenever it sees an IP, so any test that posts a submission with a forwarded
+    address would otherwise make a real call — slow, rate-limited, and failing
+    whenever the machine is offline. Tests that need a provider to answer
+    override this dependency with their own fake.
+    """
+    stub = OfflineHttpClient()
+    app.dependency_overrides[get_http_client] = lambda: stub
+    yield stub
+    # pop, not clear: override_get_db owns the wholesale clear, and this must not
+    # remove an override a test installed for itself.
+    app.dependency_overrides.pop(get_http_client, None)
 
 
 @pytest.fixture(autouse=True)
