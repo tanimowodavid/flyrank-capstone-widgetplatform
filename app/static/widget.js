@@ -96,6 +96,35 @@
   }
 
   /**
+   * Move a field out of sight without removing it from the form.
+   *
+   * Off-screen rather than display:none or type=hidden, because bots routinely
+   * skip fields hidden those two ways, and a trap a bot skips catches nothing.
+   * Positioned off-screen it looks like an ordinary input to anything reading
+   * the DOM, while a sighted visitor never sees it.
+   *
+   * The input keeps its name and stays inside the form, so FormData collects it
+   * exactly like every other field.
+   */
+  function hideFromView(container, input) {
+    container.style.position = "absolute";
+    container.style.left = "-9999px";
+    // Absolute positioning takes the container out of flow, so its spacing would
+    // otherwise be dead margin in the middle of the visible form.
+    container.style.marginBottom = "0";
+
+    // aria-hidden and tabindex go together. Hiding a focusable element from
+    // assistive tech alone would strand a keyboard user on a field they cannot
+    // see and screen readers will not announce.
+    container.setAttribute("aria-hidden", "true");
+    input.tabIndex = -1;
+
+    // Autofill is the one way a real visitor could ever fill this in: a browser
+    // matching on the "Confirm your email" label would get them flagged as a bot.
+    input.setAttribute("autocomplete", "off");
+  }
+
+  /**
    * Create a form input based on field_type.
    */
   function createFormInput(field) {
@@ -136,6 +165,14 @@
 
     container.appendChild(label);
     container.appendChild(input);
+
+    // Built identically to every other field first, then hidden. Whether the
+    // server flagged it is the only thing this script knows or cares about; it
+    // never reads the value back, and the spam decision is the server's alone.
+    if (field.is_honeypot) {
+      hideFromView(container, input);
+    }
+
     return container;
   }
 

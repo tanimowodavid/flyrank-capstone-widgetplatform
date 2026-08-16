@@ -148,3 +148,104 @@ class TestWidgetJsEndpoint:
         # (not strictly required but good practice)
         if "content-disposition" in response.headers:
             assert "widget.js" in response.headers["content-disposition"]
+
+
+class TestWidgetJsHoneypotRendering:
+    """The script hides the honeypot without opting it out of submission.
+
+    These assert on the served source, which is what this suite can reach — the
+    script has no DOM harness here. They pin the technique and, just as
+    importantly, the absence of the things that would break the trap.
+    """
+
+    async def test_script_hides_the_flagged_field_off_screen(
+        self, client: AsyncClient
+    ) -> None:
+        """Off-screen positioning, keyed off the server's is_honeypot flag."""
+        response = await client.get("/api/v1/widget.js")
+
+        assert response.status_code == 200
+        content = response.text
+
+        assert "is_honeypot" in content
+        assert "-9999px" in content
+        assert '"absolute"' in content or "'absolute'" in content
+
+    async def test_script_does_not_hide_with_display_none(
+        self, client: AsyncClient
+    ) -> None:
+        """display:none is the one technique that must not be used.
+
+        Bots specifically skip display:none and type=hidden inputs, so hiding the
+        trap that way would leave it permanently empty and catch nothing.
+        """
+        response = await client.get("/api/v1/widget.js")
+
+        assert response.status_code == 200
+        content = response.text
+
+        assert 'display = "none"' not in content
+        assert "display = 'none'" not in content
+        assert 'visibility = "hidden"' not in content
+        assert 'type = "hidden"' not in content
+
+    async def test_script_keeps_the_field_out_of_assistive_tech(
+        self, client: AsyncClient
+    ) -> None:
+        """aria-hidden and tabindex=-1, which have to travel together.
+
+        Hiding a still-focusable element from screen readers would strand a
+        keyboard user on a field they can neither see nor hear announced.
+        """
+        response = await client.get("/api/v1/widget.js")
+
+        assert response.status_code == 200
+        content = response.text
+
+        assert "aria-hidden" in content
+        assert "tabIndex = -1" in content
+
+    async def test_script_disables_autofill_on_the_honeypot(
+        self, client: AsyncClient
+    ) -> None:
+        """Autofill is the only realistic way a human fills this field.
+
+        A browser matching the "Confirm your email" label would put a real
+        visitor's address in the trap and get them flagged as a bot.
+        """
+        response = await client.get("/api/v1/widget.js")
+
+        assert response.status_code == 200
+        assert "autocomplete" in response.text
+
+    async def test_script_never_hard_codes_the_honeypot_name(
+        self, client: AsyncClient
+    ) -> None:
+        """The name is rotatable only while the script does not know it.
+
+        widget.js is cached immutable for a year; a name baked in here could not
+        be changed for that long. The is_honeypot flag is what it keys off.
+        """
+        from app.core.config import settings
+
+        response = await client.get("/api/v1/widget.js")
+
+        assert response.status_code == 200
+        assert settings.HONEYPOT_FIELD_NAME not in response.text
+
+    async def test_script_contains_no_spam_decision_logic(
+        self, client: AsyncClient
+    ) -> None:
+        """Whether a submission is spam is the server's call, never the client's.
+
+        Anything the script decided could be edited out by the bot it is meant to
+        catch, so the value is collected and forwarded without being read.
+        """
+        response = await client.get("/api/v1/widget.js")
+
+        assert response.status_code == 200
+        content = response.text
+
+        assert "is_spam" not in content
+        # The flag is read once, to decide how to draw the field — nowhere else.
+        assert content.count("is_honeypot") == 1
