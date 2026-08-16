@@ -89,8 +89,7 @@ class Settings(BaseSettings):
     GEO_PROVIDER_PRIMARY: str = "https://ip-api.com/json/"
     GEO_PROVIDER_PRIMARY_API_KEY: str | None = None  # Some providers need a key
     # FR5.1 - Add secondary provider URL for fallback
-    GEO_PROVIDER_SECONDARY: str = "https://ipstack.com/api/check"
-    GEO_PROVIDER_SECONDARY_API_KEY: str | None = None
+    GEO_PROVIDER_SECONDARY: str = "https://ipapi.co"
     # Geo lookup timeout and retries
     GEO_LOOKUP_TIMEOUT: int = 5  # seconds
     GEO_LOOKUP_MAX_RETRIES: int = 1
