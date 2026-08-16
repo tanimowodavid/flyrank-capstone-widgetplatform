@@ -10,6 +10,8 @@ reach a third-party page by inheritance.
 
 from pydantic import BaseModel, ConfigDict
 
+from app.core.config import settings
+
 
 class FormFieldConfig(BaseModel):
     """One input, as the embed script needs to render it.
@@ -26,6 +28,40 @@ class FormFieldConfig(BaseModel):
     field_type: str
     placeholder: str | None
     is_required: bool
+    # False for every real FormField row, which is why it carries a default: the
+    # model is validated straight off an ORM object that has no such column. Only
+    # the trap below sets it, and it tells the renderer to draw that one
+    # off-screen instead of in the visible form.
+    is_honeypot: bool = False
+
+
+def honeypot_field_config() -> FormFieldConfig:
+    """The spam trap appended to every widget's fields (PRD FR4.2).
+
+    Not a FormField row and not stored anywhere — it lives only in this response
+    and in the form the renderer draws from it.
+
+    Two of these values are load-bearing rather than arbitrary:
+
+    is_required stays False because a required field a visitor cannot see is a
+    form they can never submit.
+
+    field_type is "text" rather than "email" despite the label, because an
+    <input type="email"> makes the browser reject a junk value and refuse to
+    submit the form. That would block precisely the submissions we want to
+    receive and flag, turning a detector into a filter.
+    """
+    return FormFieldConfig(
+        # Read from settings on every call rather than captured at import time,
+        # so rotating the name takes effect without a restart.
+        field_name=settings.HONEYPOT_FIELD_NAME,
+        # Plausible enough that a bot filling fields by label will take the bait.
+        label="Confirm your email",
+        field_type="text",
+        placeholder=None,
+        is_required=False,
+        is_honeypot=True,
+    )
 
 
 class WidgetConfig(BaseModel):

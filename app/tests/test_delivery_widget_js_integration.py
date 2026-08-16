@@ -84,7 +84,8 @@ class TestWidgetJsIntegration:
         assert config["title"] == "Newsletter Signup"
         assert config["button_text"] == "Sign Me Up"
         assert config["theme_color"] == "#0066cc"
-        assert len(config["form_fields"]) == 2
+        # Two fields the widget defines, plus the honeypot appended by the endpoint.
+        assert len(config["form_fields"]) == 3
 
     async def test_widget_js_handles_404_for_inactive_widget(
         self, db_session: AsyncSession, client: AsyncClient

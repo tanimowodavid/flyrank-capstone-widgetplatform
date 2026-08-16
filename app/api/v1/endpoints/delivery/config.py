@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, Response
 
 from app.core.deps import DbSession
 from app.repositories.widget import WidgetRepository
-from app.schemas.delivery import WidgetConfig
+from app.schemas.delivery import WidgetConfig, honeypot_field_config
 
 # Router for widget config and other widget-specific delivery endpoints (prefixed with /widgets)
 router = APIRouter(prefix="/widgets", tags=["delivery"])
@@ -45,6 +45,9 @@ async def get_widget_config(
     and ordered form fields. Does not include customer_id, timestamps, or
     internal state.
 
+    form_fields always carries one entry the widget's owner never defined: the
+    honeypot, flagged is_honeypot=True for the renderer to hide (PRD FR4.2).
+
     Returns 404 if:
       - Widget does not exist
       - Widget exists but is_active=False (both indistinguishable to caller)
@@ -63,6 +66,12 @@ async def get_widget_config(
 
     # Serialize using WidgetConfig schema (filters out customer_id, is_active, timestamps)
     config = WidgetConfig.model_validate(widget)
+
+    # Appended here rather than stored as a FormField row: the trap belongs to the
+    # platform's spam defence, not to the owner's form definition, so it must not
+    # appear in their dashboard or survive an edit to their fields. Last in the
+    # list so the real fields keep the display_order they were given.
+    config.form_fields.append(honeypot_field_config())
 
     # Cache-Control: public (cacheable by browsers and proxies), max-age=60 (1 minute)
     response = Response(

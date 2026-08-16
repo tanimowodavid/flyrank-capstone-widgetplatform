@@ -80,19 +80,15 @@ class Settings(BaseSettings):
     RATE_LIMIT_ENABLED: bool = True
 
     # Submission validation (FR3.2)
-    # TODO: FR3.2 - Set MAX_SUBMISSION_SIZE to prevent large payloads (e.g., 10KB)
     MAX_SUBMISSION_SIZE: int = 10240  # 10 KB
 
     # Spam detection (FR4.2)
-    # TODO: FR4.2 - Configure honeypot field name (e.g., "website_url", "phone_number")
-    # This field should be hidden in the widget form; if filled, submission is marked as spam
-    HONEYPOT_FIELD_NAME: str = "website_url"
+    HONEYPOT_FIELD_NAME: str = "confirm_email_hp"
 
     # Geolocation enrichment (FR5.1-5.2)
-    # TODO: FR5.1 - Add primary geolocation provider URL and API key (e.g., ip-api.com)
     GEO_PROVIDER_PRIMARY: str = "https://ip-api.com/json/"
     GEO_PROVIDER_PRIMARY_API_KEY: str | None = None  # Some providers need a key
-    # TODO: FR5.1 - Add secondary provider URL for fallback
+    # FR5.1 - Add secondary provider URL for fallback
     GEO_PROVIDER_SECONDARY: str = "https://ipstack.com/api/check"
     GEO_PROVIDER_SECONDARY_API_KEY: str | None = None
     # Geo lookup timeout and retries
@@ -100,14 +96,14 @@ class Settings(BaseSettings):
     GEO_LOOKUP_MAX_RETRIES: int = 1
 
     # Side effects (FR5.3)
-    # TODO: FR5.3 - Configure email notification provider (e.g., SMTP settings, Sendgrid, etc.)
+    # FR5.3 - Configure email notification provider (e.g., SMTP settings, Sendgrid, etc.)
     # Email should be async/fire-and-forget; failure should not block submission
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587
     SMTP_USER: str | None = None
     SMTP_PASSWORD: str | None = None
     NOTIFICATIONS_EMAIL_FROM: str = "noreply@flyrank.example.com"
-    # TODO: FR5.3 - Add webhook configuration for side effects
+    # FR5.3 - Add webhook configuration for side effects
     # Webhook should be async; failure should not block submission
     WEBHOOK_ENABLED: bool = False
     WEBHOOK_URL: str | None = None
