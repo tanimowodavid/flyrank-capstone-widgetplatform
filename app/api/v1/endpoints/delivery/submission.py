@@ -10,6 +10,7 @@ from app.core.deps import DbSession
 from app.repositories.submission import SubmissionRepository
 from app.repositories.widget import WidgetRepository
 from app.schemas.delivery import SubmissionCreate, SubmissionResponse
+from app.schemas.submission import SubmissionData
 
 # Router for submission endpoints
 router = APIRouter(prefix="/widgets", tags=["submission"])
@@ -62,7 +63,12 @@ async def submit_widget_response(
       3. Stores the submission with best-effort enrichment data
       4. Returns a success response with submission ID
 
-    Note: Spam detection runs asynchronously after submission.
+    Spam is flagged, not refused. A submission whose honeypot was filled is
+    stored with is_spam=True and gets the same 201 and the same message as any
+    other, because a distinguishable response is a signal a bot can tune
+    against: tell it which attempts were caught and it learns to stop filling
+    the trap (PRD FR4.2).
+
     Geolocation enrichment is best-effort; submission is stored
     even if enrichment fails.
     """
@@ -85,18 +91,18 @@ async def submit_widget_response(
         # X-Forwarded-For can be a comma-separated list; take the first (original client)
         submitter_ip = x_forwarded_for.split(",")[0].strip()
 
-    # Create the submission
+    # Create the submission. from_field_values takes the honeypot out of the
+    # payload and turns it into the is_spam flag, so what the repository stores is
+    # the widget's real fields and nothing else.
     submission_repo = SubmissionRepository(db)
     created_submission = await submission_repo.create(
-        widget_id=widget_id,
-        customer_id=customer_id,
-        payload=submission.field_values,
-        submitter_ip=submitter_ip,
-        user_agent=user_agent or submission.user_agent,
-        geo_country=None,
-        geo_city=None,
-        geo_provider=None,
-        is_spam=False,
+        SubmissionData.from_field_values(
+            widget_id=widget_id,
+            customer_id=customer_id,
+            field_values=submission.field_values,
+            submitter_ip=submitter_ip,
+            user_agent=user_agent or submission.user_agent,
+        )
     )
 
     # Commit the transaction

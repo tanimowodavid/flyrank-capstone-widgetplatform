@@ -1,15 +1,12 @@
 """Submission data access layer (PRD Path C - persisting visitor submissions)."""
 
 import uuid
-from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.submission import Submission
-
-if TYPE_CHECKING:
-    pass
+from app.schemas.submission import SubmissionData
 
 
 class SubmissionRepository:
@@ -18,44 +15,30 @@ class SubmissionRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create(
-        self,
-        widget_id: uuid.UUID,
-        customer_id: uuid.UUID,
-        payload: dict,
-        submitter_ip: str | None = None,
-        user_agent: str | None = None,
-        geo_country: str | None = None,
-        geo_city: str | None = None,
-        geo_provider: str | None = None,
-        is_spam: bool = False,
-    ) -> Submission:
-        """Create a new submission with automatic timestamp.
+    async def create(self, data: SubmissionData) -> Submission:
+        """Persist a validated submission.
+
+        Takes SubmissionData rather than a raw payload and a list of keyword
+        arguments, so everything that reaches this layer has already been through
+        validation: the honeypot removed, is_spam decided. This method persists a
+        row; it does not decide what belongs in one.
 
         Args:
-            widget_id: ID of the widget this submission is for
-            customer_id: ID of the customer who owns the widget
-            payload: Form field values (dict keyed by field_name)
-            submitter_ip: IP address of the submitter (best-effort)
-            user_agent: User-Agent header from the request
-            geo_country: Country code from geolocation enrichment
-            geo_city: City name from geolocation enrichment
-            geo_provider: Geolocation provider used
-            is_spam: Whether the submission was flagged as spam
+            data: The validated, storage-ready submission
 
         Returns:
             The created Submission object
         """
         submission = Submission(
-            widget_id=widget_id,
-            customer_id=customer_id,
-            payload=payload,
-            submitter_ip=submitter_ip,
-            user_agent=user_agent,
-            geo_country=geo_country,
-            geo_city=geo_city,
-            geo_provider=geo_provider,
-            is_spam=is_spam,
+            widget_id=data.widget_id,
+            customer_id=data.customer_id,
+            payload=data.payload,
+            submitter_ip=data.submitter_ip,
+            user_agent=data.user_agent,
+            geo_country=data.geo_country,
+            geo_city=data.geo_city,
+            geo_provider=data.geo_provider,
+            is_spam=data.is_spam,
         )
         self.session.add(submission)
         await self.session.flush()

@@ -307,7 +307,7 @@ class TestSubmissionEndpoint:
         active_widget: Widget,
         db: AsyncSession,
     ) -> None:
-        """Submissions default to is_spam=false (spam detection is Stage 5)."""
+        """A submission with no honeypot value is stored unflagged."""
         payload = {
             "field_values": {"email": "test@example.com"},
         }
