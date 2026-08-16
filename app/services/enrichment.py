@@ -153,7 +153,7 @@ class EnrichmentService:
             # completed, so there is no response to inspect.
             logger.warning("Geo provider %s unreachable: %s", label, exc)
             return None
-        except Exception:  # pragma: no cover - backstop for a never-raise promise
+        except Exception:
             # Not reachable through any documented httpx path. It exists because
             # enrich() promises never to raise, and a promise resting on the
             # completeness of an exception hierarchy is not a promise.
