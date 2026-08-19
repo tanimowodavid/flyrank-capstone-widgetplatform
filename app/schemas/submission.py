@@ -21,6 +21,7 @@ Deferred, deliberately:
 
 import uuid
 from collections.abc import Mapping
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -111,3 +112,63 @@ class SubmissionData(BaseModel):
             user_agent=user_agent,
             is_spam=honeypot_filled,
         )
+
+
+class SubmissionRead(BaseModel):
+    """A stored submission as returned to its owner (PRD FR6.1).
+
+    Mirrors the Submission row. widget_title is not a column — it is resolved by
+    the dashboard layer from the owning customer's widget list so the submissions
+    view does not confront the owner with a bare UUID per row.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    widget_id: uuid.UUID | None
+    widget_title: str | None = None
+    customer_id: uuid.UUID
+    payload: dict[str, str | None]
+    submitter_ip: str | None = None
+    user_agent: str | None = None
+    geo_country: str | None = None
+    geo_city: str | None = None
+    geo_provider: str | None = None
+    is_spam: bool = False
+    created_at: datetime
+
+
+class SubmissionPage(BaseModel):
+    """A paginated slice of a customer's submissions."""
+
+    items: list[SubmissionRead]
+    total: int
+    limit: int
+    offset: int
+
+
+class SpamCount(BaseModel):
+    is_spam: bool
+    count: int
+
+
+class DailyCount(BaseModel):
+    """One day's submission count, keyed by its ISO calendar date."""
+
+    date: str
+    count: int
+
+
+class SubmissionAnalytics(BaseModel):
+    """Analytics over a customer's submissions (PRD FR6.2).
+
+    by_widget and by_country are dicts rather than lists because a frontend looks
+    up a count by key. Deleted widgets and submissions without a geo country get
+    the sentinel key "unknown" — the alternative (a null JSON key) is not valid.
+    """
+
+    total: int
+    by_widget: dict[str, int]
+    by_country: dict[str, int]
+    by_spam: list[SpamCount]
+    over_time: list[DailyCount]

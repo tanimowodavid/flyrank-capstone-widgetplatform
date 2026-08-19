@@ -15,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.config import settings
 from app.main import app
+from app.models.widget import Widget
 
 SIGNUP_URL = "/api/v1/auth/signup"
 LOGIN_URL = "/api/v1/auth/login"
@@ -154,6 +155,57 @@ class TestLoginRateLimit:
         assert response.status_code == 200
         assert response.headers.get("x-ratelimit-limit") == str(LIMIT)
         assert response.headers.get("x-ratelimit-remaining") == str(LIMIT - 1)
+
+
+SUBMIT_LIMIT = int(settings.RATE_LIMIT_SUBMIT.split("/")[0])
+SUBMIT_BURST = SUBMIT_LIMIT + 1
+
+
+class TestSubmissionRateLimit:
+    async def test_submission_burst_is_throttled(
+        self,
+        rate_limited: None,
+        active_widget: Widget,
+    ) -> None:
+        statuses: list[int] = []
+
+        async with client_from("10.0.0.10") as caller:
+            for _ in range(SUBMIT_BURST):
+                response = await caller.post(
+                    f"/api/v1/widgets/{active_widget.id}/submit",
+                    json={"field_values": {"email": "visitor@example.com"}},
+                )
+                statuses.append(response.status_code)
+
+        assert statuses[:SUBMIT_LIMIT] == [201] * SUBMIT_LIMIT
+        assert statuses[SUBMIT_LIMIT:] == [429] * (SUBMIT_BURST - SUBMIT_LIMIT)
+
+    async def test_throttled_submission_includes_retry_after(
+        self,
+        rate_limited: None,
+        active_widget: Widget,
+    ) -> None:
+        async with client_from("10.0.0.11") as caller:
+            for _ in range(SUBMIT_LIMIT):
+                await caller.post(
+                    f"/api/v1/widgets/{active_widget.id}/submit",
+                    json={"field_values": {"email": "visitor@example.com"}},
+                )
+
+            response = await caller.post(
+                f"/api/v1/widgets/{active_widget.id}/submit",
+                json={"field_values": {"email": "visitor@example.com"}},
+            )
+
+        assert response.status_code == 429
+        retry_after = response.headers.get("Retry-After")
+        assert retry_after is not None, "429 must tell the caller how long to wait"
+        assert retry_after.isdigit()
+        assert 1 <= int(retry_after) <= 60
+
+        assert response.json() == {
+            "detail": "Too many requests. Please try again later."
+        }
 
 
 class TestRateLimitDisabled:

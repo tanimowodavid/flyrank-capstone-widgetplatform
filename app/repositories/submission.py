@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.submission import Submission
@@ -66,7 +66,11 @@ class SubmissionRepository:
         return result.scalar_one_or_none()
 
     async def list_by_customer(
-        self, customer_id: uuid.UUID, limit: int = 100, offset: int = 0
+        self,
+        customer_id: uuid.UUID,
+        limit: int = 100,
+        offset: int = 0,
+        widget_id: uuid.UUID | None = None,
     ) -> list[Submission]:
         """List submissions for a customer, ordered by most recent first.
 
@@ -74,17 +78,15 @@ class SubmissionRepository:
             customer_id: ID of the customer
             limit: Maximum number of results to return
             offset: Number of results to skip
+            widget_id: When given, restrict to one of the customer's widgets
 
         Returns:
             List of Submission objects, newest first
         """
-        query = (
-            select(Submission)
-            .where(Submission.customer_id == customer_id)
-            .order_by(Submission.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        query = select(Submission).where(Submission.customer_id == customer_id)
+        if widget_id is not None:
+            query = query.where(Submission.widget_id == widget_id)
+        query = query.order_by(Submission.created_at.desc()).limit(limit).offset(offset)
         result = await self.session.execute(query)
         return result.scalars().all()
 
@@ -141,3 +143,85 @@ class SubmissionRepository:
         )
         result = await self.session.execute(query)
         return len(result.scalars().all())
+
+    def _customer_scoped(
+        self,
+        customer_id: uuid.UUID,
+        widget_id: uuid.UUID | None = None,
+    ):
+        """Base WHERE clause for every owner-scoped aggregate query."""
+        conditions = [Submission.customer_id == customer_id]
+        if widget_id is not None:
+            conditions.append(Submission.widget_id == widget_id)
+        return conditions
+
+    async def count_for_customer(
+        self,
+        customer_id: uuid.UUID,
+        widget_id: uuid.UUID | None = None,
+    ) -> int:
+        """Total submissions for a customer, optionally for one widget.
+
+        Uses COUNT(*) rather than loading rows: the dashboard list needs a total
+        alongside the page, and the page itself already carries the data.
+        """
+        query = (
+            select(func.count(Submission.id))
+            .where(*self._customer_scoped(customer_id, widget_id))
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one()
+
+    async def counts_per_widget(
+        self,
+        customer_id: uuid.UUID,
+        widget_id: uuid.UUID | None = None,
+    ) -> list[tuple[uuid.UUID | None, int]]:
+        """Submission counts grouped by widget_id, newest widgets not implied."""
+        query = (
+            select(Submission.widget_id, func.count(Submission.id))
+            .where(*self._customer_scoped(customer_id, widget_id))
+            .group_by(Submission.widget_id)
+        )
+        return list((await self.session.execute(query)).all())
+
+    async def counts_per_country(
+        self,
+        customer_id: uuid.UUID,
+        widget_id: uuid.UUID | None = None,
+    ) -> list[tuple[str | None, int]]:
+        """Submission counts grouped by geo_country (None where not enriched)."""
+        query = (
+            select(Submission.geo_country, func.count(Submission.id))
+            .where(*self._customer_scoped(customer_id, widget_id))
+            .group_by(Submission.geo_country)
+        )
+        return list((await self.session.execute(query)).all())
+
+    async def counts_per_spam(
+        self,
+        customer_id: uuid.UUID,
+        widget_id: uuid.UUID | None = None,
+    ) -> list[tuple[bool, int]]:
+        """Submission counts split between spam and legitimate."""
+        query = (
+            select(Submission.is_spam, func.count(Submission.id))
+            .where(*self._customer_scoped(customer_id, widget_id))
+            .group_by(Submission.is_spam)
+        )
+        return list((await self.session.execute(query)).all())
+
+    async def counts_per_day(
+        self,
+        customer_id: uuid.UUID,
+        widget_id: uuid.UUID | None = None,
+    ) -> list[tuple[object, int]]:
+        """Submission counts by calendar day, oldest first (PRD FR6.2)."""
+        day = func.date_trunc("day", Submission.created_at)
+        query = (
+            select(day.label("day"), func.count(Submission.id))
+            .where(*self._customer_scoped(customer_id, widget_id))
+            .group_by(day)
+            .order_by(day)
+        )
+        return list((await self.session.execute(query)).all())

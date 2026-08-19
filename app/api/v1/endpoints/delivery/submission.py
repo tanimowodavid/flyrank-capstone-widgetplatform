@@ -3,10 +3,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 
+from app.core.config import settings
 from app.core.deps import DbSession, HttpClient
+from app.core.rate_limit import limiter
 from app.schemas.delivery import SubmissionCreate, SubmissionResponse
 from app.services.enrichment import EnrichmentService
 from app.services.submission import SubmissionService, WidgetNotAvailableError
@@ -37,7 +39,10 @@ async def options_submit_widget_response() -> JSONResponse:
     status_code=status.HTTP_201_CREATED,
     summary="Submit form response (public endpoint, no auth required)",
 )
+@limiter.limit(settings.RATE_LIMIT_SUBMIT)
 async def submit_widget_response(
+    request: Request,
+    response: Response,
     widget_id: uuid.UUID,
     submission: SubmissionCreate,
     db: DbSession,
@@ -102,13 +107,9 @@ async def submit_widget_response(
         "message": "Thank you for your submission",
     }
 
-    return JSONResponse(
-        status_code=status.HTTP_201_CREATED,
-        content=response_data,
-        headers={
-            # Allow cross-origin submissions
-            "Access-Control-Allow-Origin": "*",
-            # POST submissions are not cached (only GET is)
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-        },
-    )
+    # Allow cross-origin submissions
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    # POST submissions are not cached (only GET is)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+
+    return response_data

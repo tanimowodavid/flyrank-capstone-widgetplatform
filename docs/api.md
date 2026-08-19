@@ -226,8 +226,8 @@ Successful responses on rate-limited endpoints also include the `X-RateLimit-*` 
 | `GET` | `/api/v1/widgets/{widget_id}/config` | No | Live |
 | `GET` | `/api/v1/widget.js` | No | Live |
 | `POST` | `/api/v1/widgets/{widget_id}/submit` | No | Live |
-| `GET` | `/api/v1/dashboard/submissions` | Bearer | Planned |
-| `GET` | `/api/v1/dashboard/analytics` | Bearer | Planned |
+| `GET` | `/api/v1/dashboard/submissions` | Bearer | Live |
+| `GET` | `/api/v1/dashboard/analytics` | Bearer | Live |
 
 ---
 
@@ -756,6 +756,112 @@ The following features are configured but **not yet implemented**:
 
 ---
 
+## Dashboard (owner)
+
+All routes in this section are prefixed with `/api/v1/dashboard` and require a Bearer token. Every response is scoped to the authenticated customer; a `widget_id` filter referencing a widget the caller does not own returns the same 404 as a widget that does not exist.
+
+---
+
+### `GET /dashboard/submissions`
+
+List the authenticated customer's submissions, newest first, with pagination metadata.
+
+**Auth:** Bearer required
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `widget_id` | UUID | — | Restrict to one of the caller's widgets |
+| `limit` | integer | `50` | Page size, capped at `100` |
+| `offset` | integer | `0` | Rows to skip |
+
+**Response `200 OK`: [`SubmissionPage`](#submissionpage)**
+
+```json
+{
+  "items": [
+    {
+      "id": "2f3f...",
+      "widget_id": "a1b2...",
+      "widget_title": "Newsletter Signup",
+      "customer_id": "c9d8...",
+      "payload": { "email": "visitor@example.com" },
+      "submitter_ip": "203.0.113.4",
+      "user_agent": "Mozilla/5.0",
+      "geo_country": "US",
+      "geo_city": "Seattle",
+      "geo_provider": "ip-api.com",
+      "is_spam": false,
+      "created_at": "2026-08-19T10:15:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+**Errors**
+
+| Status | Detail |
+| --- | --- |
+| 401 | Missing or invalid token |
+| 404 | `"Widget not found"` — filter references an unknown or foreign widget |
+| 422 | Invalid `limit`/`offset`/`widget_id` |
+
+---
+
+### `GET /dashboard/analytics`
+
+Return submission analytics for the authenticated customer.
+
+**Auth:** Bearer required
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `widget_id` | UUID | — | Restrict to one of the caller's widgets |
+
+**Response `200 OK`: [`SubmissionAnalytics`](#submissionanalytics)**
+
+```json
+{
+  "total": 4,
+  "by_widget": {
+    "a1b2...": 3,
+    "unknown": 1
+  },
+  "by_country": {
+    "US": 2,
+    "unknown": 2
+  },
+  "by_spam": [
+    { "is_spam": false, "count": 3 },
+    { "is_spam": true, "count": 1 }
+  ],
+  "over_time": [
+    { "date": "2026-08-18", "count": 1 },
+    { "date": "2026-08-19", "count": 3 }
+  ]
+}
+```
+
+- `by_widget` keys are the customer's widget UUIDs; `"unknown"` groups submissions whose widget was deleted.
+- `by_country` keys are the geo provider's country codes; `"unknown"` groups submissions that were never enriched.
+- `over_time` is a per-day series from oldest to newest, keyed by ISO calendar date.
+
+**Errors**
+
+| Status | Detail |
+| --- | --- |
+| 401 | Missing or invalid token |
+| 404 | `"Widget not found"` — filter references an unknown or foreign widget |
+| 422 | Invalid `widget_id` |
+
+---
+
 ## Widget embedding guide
 
 ### Supported widget types
@@ -965,25 +1071,47 @@ Public-facing widget configuration (no internal IDs or timestamps).
 | `created_at` | string (ISO 8601) | Submission timestamp |
 | `message` | string | User-facing confirmation message |
 
+### SubmissionRead
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string (UUID) | Submission identifier |
+| `widget_id` | string (UUID) \| null | Widget the submission arrived through (null if deleted) |
+| `widget_title` | string \| null | Title of that widget at read time |
+| `customer_id` | string (UUID) | Owning customer |
+| `payload` | object | Map of `field_name` → stored value |
+| `submitter_ip` | string \| null | IP observed at submission |
+| `user_agent` | string \| null | Browser user agent |
+| `geo_country` | string \| null | Enriched country |
+| `geo_city` | string \| null | Enriched city |
+| `geo_provider` | string \| null | Geo provider that answered |
+| `is_spam` | boolean | Whether the honeypot was filled |
+| `created_at` | string (ISO 8601) | Submission timestamp |
+
+### SubmissionPage
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `items` | SubmissionRead[] | The requested slice |
+| `total` | integer | Total matching submissions |
+| `limit` | integer | Page size echoed from the request |
+| `offset` | integer | Offset echoed from the request |
+
+### SubmissionAnalytics
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `total` | integer | Total submissions in scope |
+| `by_widget` | object | `{widget_id: count}`; `"unknown"` for deleted widgets |
+| `by_country` | object | `{country: count}`; `"unknown"` when not enriched |
+| `by_spam` | object[] | `[{ "is_spam": boolean, "count": integer }]` |
+| `over_time` | object[] | `[{ "date": "YYYY-MM-DD", "count": integer }]`, oldest first |
+
 ---
 
 ## Planned endpoints
 
 The following endpoints have stub router modules but are **not registered** in the application. They are documented here for reference against the [PRD](PRD.md).
-
-### Dashboard — `GET /api/v1/dashboard/submissions`
-
-List submissions for the authenticated customer with pagination.
-
-**Planned query parameters:** `widget_id` (optional filter), `limit`, `offset`
-
-**Auth:** Bearer required
-
-### Dashboard — `GET /api/v1/dashboard/analytics`
-
-Return submission analytics: total count, per-widget breakdown, geo breakdown, spam breakdown.
-
-**Auth:** Bearer required
 
 ### Alternate submission path — `POST /api/v1/public/widgets/{widget_id}/submit`
 

@@ -155,17 +155,24 @@ Submits the form. No login. This is the most hostile-facing part of the system �
 
 ## 8. Success Criteria (Definition of Done)
 
-The project is considered complete when all of the following are true and demonstrable:
-
-1. A widget can be created, and its embed snippet works on a real, separate-origin HTML page.
-2. A visitor can submit the widget and see the submission appear in the owner's dashboard, enriched with geo data.
-3. Invalid and oversized submissions are cleanly rejected — never a server crash.
-4. A burst of rapid submissions triggers rate limiting (429), while normal traffic continues to succeed.
-5. Disabling the primary geo provider causes an automatic, transparent fallback to the secondary provider; disabling both still results in a successful, un-enriched submission.
-6. A forced failure in the email/webhook side effect does not prevent the submission from being stored.
-7. A honeypot-filled submission is identified and blocked as spam.
-8. One tenant cannot read or modify another tenant's widgets or submissions, under any circumstance.
-9. All of the above are covered by automated tests and documented with evidence (logs, test output, or request transcripts).
+- Authenticated CRUD endpoints for widgets; requests without valid auth are rejected.
+- Multi-tenant isolation proven: tenant A cannot read or modify tenant B's widgets or submissions.
+- Embed snippet generated per widget.
+- Public config endpoint serves a small payload with correct HTTP cache headers.
+- Widget JavaScript is served as a versioned bundle (new version = new URL or cache-bust).
+- The widget renders on a page served from a different origin than your API.
+- Cross-origin submissions work: CORS headers correct, preflight ( OPTIONS ) handled.
+- All incoming input validated; malformed and oversized payloads rejected with appropriate 4xx codes and - JSON errors.
+- Valid submissions stored safely, linked to the right widget and tenant.
+- Rate limiting per IP and/or per widget returns 429 under a burst — and the API keeps serving legitimate - traffic.
+- At least one spam-prevention technique (honeypot field, token, or heuristic) demonstrably blocks a spam - submission.
+- IP→geo enrichment uses a provider fallback chain: provider A down → provider B answers → submission - enriched.
+- All providers down → submission still succeeds (without geo). Degrade, never fail.
+- A failing confirmation email / webhook does not prevent the submission from being stored.
+- Automated tests cover: CORS preflight, invalid payload, oversized payload, rate limiting, spam control, - provider fallback,
+- and successful widget rendering.
+- README with architecture diagram, setup instructions, and API documentation; the five submission-pack files from § 11
+  present.
 
 ---
 
