@@ -213,3 +213,4 @@ Open http://localhost:5500 in your browser. You should see:
 - [Entity Relationship Diagram (ERD)](docs/ERD.mmd)
 - [API Reference](docs/API.md)
 - [Build log](docs/BUILDLOG.md)
+- [EVIDENCE.md](docs/EVIDENCE.md)
